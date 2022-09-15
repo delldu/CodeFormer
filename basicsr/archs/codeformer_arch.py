@@ -216,7 +216,7 @@ class CodeFormer(VQAutoEncoder):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x, w=0, detach_16=True, code_only=False, adain=False):
+    def forward(self, x, detach_16=True, code_only=False):
         # ################### Encoder #####################
         enc_feat_dict = {}
         out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
@@ -256,10 +256,10 @@ class CodeFormer(VQAutoEncoder):
         # preserve gradients
         # quant_feat = lq_feat + (quant_feat - lq_feat).detach()
 
-        if detach_16:
+        if detach_16: # True
             quant_feat = quant_feat.detach() # for training stage III
-        if adain:
-            quant_feat = adaptive_instance_normalization(quant_feat, lq_feat)
+
+        quant_feat = adaptive_instance_normalization(quant_feat, lq_feat)
 
         # ################## Generator ####################
         x = quant_feat
@@ -269,8 +269,7 @@ class CodeFormer(VQAutoEncoder):
             x = block(x) 
             if i in fuse_list: # fuse after i-th block
                 f_size = str(x.shape[-1])
-                if w>0:
-                    x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x, w)
+                x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x, 0.5) # w -- 0.5
         out = x
         # logits doesn't need softmax before cross_entropy loss
         return out, logits, lq_feat

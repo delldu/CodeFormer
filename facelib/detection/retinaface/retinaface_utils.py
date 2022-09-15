@@ -3,18 +3,19 @@ import torch
 import torchvision
 from itertools import product as product
 from math import ceil
-
+import pdb
 
 class PriorBox(object):
 
     def __init__(self, cfg, image_size=None, phase='train'):
         super(PriorBox, self).__init__()
-        self.min_sizes = cfg['min_sizes']
-        self.steps = cfg['steps']
-        self.clip = cfg['clip']
+        self.min_sizes = cfg['min_sizes'] # [[16, 32], [64, 128], [256, 512]]
+        self.steps = cfg['steps'] # [8, 16, 32]
+        self.clip = cfg['clip'] # False
         self.image_size = image_size
         self.feature_maps = [[ceil(self.image_size[0] / step), ceil(self.image_size[1] / step)] for step in self.steps]
         self.name = 's'
+
 
     def forward(self):
         anchors = []
@@ -31,20 +32,51 @@ class PriorBox(object):
 
         # back to torch land
         output = torch.Tensor(anchors).view(-1, 4)
-        if self.clip:
+        if self.clip: # False
             output.clamp_(max=1, min=0)
         return output
 
 
+# def py_cpu_nms(dets, thresh):
+#     """Pure Python NMS baseline."""
+#     keep = torchvision.ops.nms(
+#         boxes=torch.Tensor(dets[:, :4]),
+#         scores=torch.Tensor(dets[:, 4]),
+#         iou_threshold=thresh,
+#     )
+
+#     return list(keep)
+
+
 def py_cpu_nms(dets, thresh):
     """Pure Python NMS baseline."""
-    keep = torchvision.ops.nms(
-        boxes=torch.Tensor(dets[:, :4]),
-        scores=torch.Tensor(dets[:, 4]),
-        iou_threshold=thresh,
-    )
+    x1 = dets[:, 0]
+    y1 = dets[:, 1]
+    x2 = dets[:, 2]
+    y2 = dets[:, 3]
+    scores = dets[:, 4]
 
-    return list(keep)
+    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+    order = scores.argsort()[::-1]
+
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+
+        w = np.maximum(0.0, xx2 - xx1 + 1)
+        h = np.maximum(0.0, yy2 - yy1 + 1)
+        inter = w * h
+        ovr = inter / (areas[i] + areas[order[1:]] - inter)
+
+        inds = np.where(ovr <= thresh)[0]
+        order = order[inds + 1]
+
+    return keep
 
 
 def point_form(boxes):
@@ -62,18 +94,18 @@ def point_form(boxes):
         1)  # xmax, ymax
 
 
-def center_size(boxes):
-    """ Convert prior_boxes to (cx, cy, w, h)
-    representation for comparison to center-size form ground truth data.
-    Args:
-        boxes: (tensor) point_form boxes
-    Return:
-        boxes: (tensor) Converted xmin, ymin, xmax, ymax form of boxes.
-    """
-    return torch.cat(
-        (boxes[:, 2:] + boxes[:, :2]) / 2,  # cx, cy
-        boxes[:, 2:] - boxes[:, :2],
-        1)  # w, h
+# def center_size(boxes):
+#     """ Convert prior_boxes to (cx, cy, w, h)
+#     representation for comparison to center-size form ground truth data.
+#     Args:
+#         boxes: (tensor) point_form boxes
+#     Return:
+#         boxes: (tensor) Converted xmin, ymin, xmax, ymax form of boxes.
+#     """
+#     return torch.cat(
+#         (boxes[:, 2:] + boxes[:, :2]) / 2,  # cx, cy
+#         boxes[:, 2:] - boxes[:, :2],
+#         1)  # w, h
 
 
 def intersect(box_a, box_b):

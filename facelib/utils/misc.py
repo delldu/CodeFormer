@@ -5,8 +5,8 @@ import torch
 from torch.hub import download_url_to_file, get_dir
 from urllib.parse import urlparse
 # from basicsr.utils.download_util import download_file_from_google_drive
-import gdown
-
+# import gdown
+import pdb
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -98,6 +98,10 @@ def load_file_from_url(url, model_dir=None, progress=True, file_name=None):
     if not os.path.exists(cached_file):
         print(f'Downloading: "{url}" to {cached_file}\n')
         download_url_to_file(url, cached_file, hash_prefix=None, progress=progress)
+
+    # cached_file -- weights/facelib/detection_Resnet50_Final.pth
+    # weights/facelib/parsing_parsenet.pth
+    
     return cached_file
 
 

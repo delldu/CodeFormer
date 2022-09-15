@@ -89,7 +89,7 @@ class Predictor(BasePredictor):
             self.face_helper.read_image(img)
             # get face landmarks for each face
             num_det_faces = self.face_helper.get_face_landmarks_5(
-                only_center_face=only_center_face, resize=640, eye_dist_threshold=5
+                resize=640, eye_dist_threshold=5
             )
             print(f"\tdetect {num_det_faces} faces")
             # align and warp each face
@@ -129,7 +129,7 @@ class Predictor(BasePredictor):
                 bg_img = bg_upsampler.enhance(img, outscale=upscale)[0]
             else:
                 bg_img = None
-            self.face_helper.get_inverse_affine(None)
+            # self.face_helper.get_inverse_affine()
             # paste each restored face to the input image
             if face_upsample and face_upsampler is not None:
                 restored_img = self.face_helper.paste_faces_to_input_image(

@@ -212,7 +212,6 @@ if __name__ == '__main__':
     import os
 
     from facelib.detection import init_detection_model
-    from facelib.utils.face_restoration_helper import get_largest_face
 
     img_path = '/home/wxt/datasets/ffhq/ffhq_wild/00009.png'
     img_name = os.splitext(os.path.basename(img_path))[0]
@@ -230,7 +229,6 @@ if __name__ == '__main__':
         bboxes = det_net.detect_faces(img, 0.97)
     if scale > 1:
         bboxes *= scale  # the score is incorrect
-    bboxes = get_largest_face(bboxes, h, w)[0]
 
     landmarks = np.array([[bboxes[i], bboxes[i + 1]] for i in range(5, 15, 2)])
 
