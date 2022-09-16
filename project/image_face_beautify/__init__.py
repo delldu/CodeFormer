@@ -101,6 +101,8 @@ def image_predict(input_files, output_dir):
         # orig input
         input_tensor = todos.data.load_rgba_tensor(filename)
 
+        print(filename)
+
         # pytorch recommand clone.detach instead of torch.Tensor(input_tensor)
         predict_tensor = model_forward(model, device, input_tensor)
         output_file = f"{output_dir}/{os.path.basename(filename)}"

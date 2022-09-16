@@ -90,12 +90,13 @@ if __name__ == '__main__':
         img_name = os.path.basename(img_path)
         print(f'Processing: {img_name}')
         basename, ext = os.path.splitext(img_name)
-        img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+        img = cv2.imread(img_path, cv2.IMREAD_COLOR) # BGR format
+
         print(img_path, "img.shape: ", img.shape)
 
         # upsample the background
         # Now only support RealESRGAN for upsampling background
-        bg_img = bg_upsampler.enhance(img, outscale=args.upscale)[0]
+        bg_img = bg_upsampler.enhance(img, outscale=args.upscale)[0] # BGR | BGRA, uint8
         print("bg_img shape: ", bg_img.shape)
 
 

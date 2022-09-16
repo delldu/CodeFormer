@@ -10,50 +10,49 @@ from facelib.parsing import init_parsing_model
 from facelib.utils.misc import img2tensor, imwrite
 import pdb
 
-def get_affine_matrix(src_pts, dst_pts):
-    '''min(|AX - B|)'''
 
-    N, C = src_pts.size()
-    ones = torch.ones((N, 1)).to(src_pts.device)
-    A = torch.hstack([src_pts, ones]).to(torch.float32)
-    B = torch.hstack([dst_pts, ones]).to(torch.float32)
+def get_affine_matrix(landmarks, std_landmarks):
+    '''min ||Q@M - S||, Q@M ===== S'''
 
-    X, res, rank, s = torch.linalg.lstsq(A, B)
-    pdb.set_trace()
+    Q = torch.zeros((10, 4))
 
-    rank = rank.item()
+    S = std_landmarks.to(torch.float32).view(-1)
+    for i in range(5):
+        x, y = landmarks[i]
+        Q[i * 2 + 0] = torch.Tensor([x,  y, 1.0, 0.0])
+        Q[i * 2 + 1] = torch.Tensor([y, -x, 0.0, 1.0])
 
-    if rank == 3:
-        M = torch.Tensor([
-            [X[0, 0], X[1, 0], X[2, 0]],
-            [X[0, 1], X[1, 1], X[2, 1]],
-            [0.0,      0.0,     1.0],
-        ])
-    elif rank == 2:
-        M = torch.Tensor([
-            [X[0, 0], X[1, 0], 0.0],
-            [X[0, 1], X[1, 1], 0.0],
-            [0.0,      0.0,     1.0],
-        ])
-    else:
-        M = torch.Tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    M = torch.linalg.lstsq(Q, S).solution.view(-1)
+    matrix = torch.Tensor([
+        [M[0], M[1], M[2]],
+        [-M[1], M[0], M[3]],
+        [0.0, 0.0, 1.0]
+    ])
 
-    return M
+    return matrix
+
 
 def get_affine_image(image, matrix):
     B, C, H, W = image.shape
-
     T = torch.Tensor([
         [2.0/W,   0.0,   -1.0],
         [0.0,   2.0/H,   -1.0],
         [0.0,     0.0,    1.0]
     ]).to(matrix.device)
 
+    # T2 = torch.Tensor([
+    #     [2.0/512,   0.0,   -1.0],
+    #     [0.0,   2.0/512,   -1.0],
+    #     [0.0,     0.0,    1.0]
+    # ]).to(matrix.device)
+
     theta = torch.linalg.inv(T @ matrix @ torch.linalg.inv(T))
+    # theta = T2 @ matrix @ torch.linalg.inv(T1)
+    # theta = torch.linalg.inv(torch.linalg.inv(T2) @ matrix @ T1)
     theta = theta[0:2, :].view(-1, 2, 3)
 
     grid = F.affine_grid(theta, size=[B, C, H, W])
-    output = F.grid_sample(image.to(torch.float32), grid, mode='bilinear', padding_mode='zeros')
+    output = F.grid_sample(image.to(torch.float32), grid, mode='bilinear', padding_mode='border')
 
     return output
 
@@ -131,11 +130,11 @@ class FaceRestoreHelper(object):
         if np.max(img) > 256:  # 16-bit image
             img = img / 65535 * 255
         if len(img.shape) == 2:  # gray image
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) # xxxx9999
         elif img.shape[2] == 4:  # BGRA image with alpha channel
             img = img[:, :, 0:3]
 
-        self.input_img = img
+        self.input_img = img # BGR | BGRA, uint8
 
         # if min(self.input_img.shape[:2])<512:
         #     f = 512.0/min(self.input_img.shape[:2])
@@ -190,8 +189,11 @@ class FaceRestoreHelper(object):
             # landmark.shape -- (5,2)
             # self.face_template.shape -- (5, 2)
             # affine_matrix.shape -- (2,3)
+            # print("affine_matrix: ", affine_matrix)
 
-            # M = get_affine_matrix(torch.from_numpy(landmark), torch.from_numpy(self.face_template))
+            M = get_affine_matrix(torch.from_numpy(landmark), torch.from_numpy(self.face_template))
+            # print("M: ", M)
+
 
             self.affine_matrices.append(affine_matrix)
             # warp and crop faces
@@ -204,22 +206,24 @@ class FaceRestoreHelper(object):
 
             input_img = self.input_img # (512, 811, 3)
             # self.face_size -- (512, 512)
-            cropped_face = cv2.warpAffine(
-                input_img, affine_matrix, self.face_size, borderMode=border_mode, borderValue=(135, 133, 132))  # gray
+            # cropped_face = cv2.warpAffine(
+            #     input_img, affine_matrix, self.face_size, borderMode=border_mode, borderValue=(135, 133, 132))  # gray
 
-            # cropped_face.shape -- (512, 512, 3)
 
-            # cropped_face_x = get_affine_image(torch.from_numpy(input_img.transpose(2, 0, 1)).unsqueeze(0), 
-            #     M)
-            # cropped_face_x = cropped_face_x[:, :, :self.face_size[0], :self.face_size[1]]
-            # cropped_face_x = cropped_face_x.squeeze(0).numpy().transpose(1, 2, 0)
+            # cv2.imwrite("/tmp/face_1.png", cropped_face)
 
-            # # cv2.imwrite("/tmp/cropped_face.png", cropped_face)
-            # # cv2.imwrite("/tmp/cropped_face_x.png", cropped_face_x)
+            cropped_face = get_affine_image(torch.from_numpy(input_img.transpose(2, 0, 1)).unsqueeze(0), M)
+            cropped_face = cropped_face[:, :, :self.face_size[0], :self.face_size[1]]
+            cropped_face = cropped_face.squeeze(0).numpy().transpose(1, 2, 0)
+
+            # cv2.imwrite("/tmp/face_2.png", cropped_face_x)
+            # pdb.set_trace()
 
             self.cropped_faces.append(cropped_face)
 
-            inverse_affine = cv2.invertAffineTransform(affine_matrix)
+            # inverse_affine = cv2.invertAffineTransform(affine_matrix)
+            inverse_affine = cv2.invertAffineTransform(M[0:2, :].numpy())
+
             inverse_affine *= self.upscale_factor # 2
             self.inverse_affine_matrices.append(inverse_affine)
 

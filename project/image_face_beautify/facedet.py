@@ -13,25 +13,16 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 import torchvision.models as models
 from torchvision.models._utils import IntermediateLayerGetter as IntermediateLayerGetter
-
+import math
 import numpy as np
 import pdb
 
 # Adapted from https://github.com/Hakuyume/chainer-ssd
 def decode_boxes(loc, priors, variances):
-    """Decode locations from predictions using priors to undo
-    the encoding we did for offset regression at train time.
-    Args:
-        loc (tensor): location predictions for loc layers,
-            Shape: [num_priors,4]
-        priors (tensor): Prior boxes in center-offset form.
-            Shape: [num_priors,4].
-        variances: (list[float]) Variances of priorboxes
-    Return:
-        decoded bounding box predictions
-    """
+    """Decode locations from predictions using priors"""
 
     boxes = torch.cat(
         (
@@ -46,17 +37,7 @@ def decode_boxes(loc, priors, variances):
 
 
 def decode_landms(pre, priors, variances):
-    """Decode landm from predictions using priors to undo
-    the encoding we did for offset regression at train time.
-    Args:
-        pre (tensor): landm predictions for loc layers,
-            Shape: [num_priors,10]
-        priors (tensor): Prior boxes in center-offset form.
-            Shape: [num_priors,4].
-        variances: (list[float]) Variances of priorboxes
-    Return:
-        decoded landm predictions
-    """
+    """Decode landm from predictions using priors"""
     tmp = (
         priors[:, :2] + pre[:, :2] * variances[0] * priors[:, 2:],
         priors[:, :2] + pre[:, 2:4] * variances[0] * priors[:, 2:],
@@ -68,72 +49,65 @@ def decode_landms(pre, priors, variances):
     return landms
 
 
-class PriorBox(object):
-    def __init__(self, H: int, W: int):
-        super(PriorBox, self).__init__()
-        self.min_sizes = [[16, 32], [64, 128], [256, 512]]
-        self.steps = [8, 16, 32]
-        self.H = H
-        self.W = W
-        self.feature_maps = [[ceil(self.H / s), ceil(self.W / s)] for s in self.steps]
+def prior_box(H: int, W: int):
+    min_sizes = [[16, 32], [64, 128], [256, 512]]
+    steps = [8, 16, 32]
+    feature_maps = [[math.ceil(H / s), math.ceil(W / s)] for s in steps]
 
-    def forward(self):
-        anchors = []
-        for k, f in enumerate(self.feature_maps):
-            min_sizes = self.min_sizes[k]
-            for i in range(f[0]):
-                for j in range(f[1]):
-                    for min_size in min_sizes:
-                        s_kx = min_size / self.W
-                        s_ky = min_size / self.H
-                        cx = (j + 0.5) * self.steps[k] / self.W
-                        cy = (i + 0.5) * self.steps[k] / self.H
-                        anchors += [cx, cy, s_kx, s_ky]
+    anchors = []
+    for k, f in enumerate(feature_maps):
+        k_sizes = min_sizes[k]
+        for i in range(f[0]):
+            for j in range(f[1]):
+                for min_size in k_sizes:
+                    s_kx = min_size / W
+                    s_ky = min_size / H
+                    cx = (j + 0.5) * steps[k] / W
+                    cy = (i + 0.5) * steps[k] / H
+                    anchors += [cx, cy, s_kx, s_ky]
 
-        # back to torch land
-        return torch.Tensor(anchors).view(-1, 4)
+    return torch.Tensor(anchors).view(-1, 4)
+
+
+def nms(boxes, scores, thresh):
+    """NMS"""
+    keep = torchvision.ops.nms(
+        boxes=boxes,
+        scores=scores,  # 1D
+        iou_threshold=thresh,
+    )
+    return keep
 
 
 # def py_cpu_nms(dets, thresh):
 #     """Pure Python NMS baseline."""
-#     keep = torchvision.ops.nms(
-#         boxes=torch.Tensor(dets[:, :4]),
-#         scores=torch.Tensor(dets[:, 4]),
-#         iou_threshold=thresh,
-#     )
+#     x1 = dets[:, 0]
+#     y1 = dets[:, 1]
+#     x2 = dets[:, 2]
+#     y2 = dets[:, 3]
+#     scores = dets[:, 4]
 
-#     return list(keep)
+#     areas = (x2 - x1 + 1) * (y2 - y1 + 1)
+#     order = scores.argsort()[::-1]
 
+#     keep = []
+#     while order.size > 0:
+#         i = order[0]
+#         keep.append(i)
+#         xx1 = np.maximum(x1[i], x1[order[1:]])
+#         yy1 = np.maximum(y1[i], y1[order[1:]])
+#         xx2 = np.minimum(x2[i], x2[order[1:]])
+#         yy2 = np.minimum(y2[i], y2[order[1:]])
 
-def py_cpu_nms(dets, thresh):
-    """Pure Python NMS baseline."""
-    x1 = dets[:, 0]
-    y1 = dets[:, 1]
-    x2 = dets[:, 2]
-    y2 = dets[:, 3]
-    scores = dets[:, 4]
+#         w = np.maximum(0.0, xx2 - xx1 + 1)
+#         h = np.maximum(0.0, yy2 - yy1 + 1)
+#         inter = w * h
+#         ovr = inter / (areas[i] + areas[order[1:]] - inter)
 
-    areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-    order = scores.argsort()[::-1]
+#         inds = np.where(ovr <= thresh)[0]
+#         order = order[inds + 1]
 
-    keep = []
-    while order.size > 0:
-        i = order[0]
-        keep.append(i)
-        xx1 = np.maximum(x1[i], x1[order[1:]])
-        yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]])
-        yy2 = np.minimum(y2[i], y2[order[1:]])
-
-        w = np.maximum(0.0, xx2 - xx1 + 1)
-        h = np.maximum(0.0, yy2 - yy1 + 1)
-        inter = w * h
-        ovr = inter / (areas[i] + areas[order[1:]] - inter)
-
-        inds = np.where(ovr <= thresh)[0]
-        order = order[inds + 1]
-
-    return keep
+#     return keep
 
 
 def conv_bn(inp, oup, stride=1, leaky=0):
@@ -302,7 +276,6 @@ class RetinaFace(nn.Module):
         # 'in_channel': 256, 'out_channel': 256}
 
         self.phase = phase
-        self.scale, self.scale1 = None, None
 
         # Build network.
         backbone = models.resnet50(pretrained=False)
@@ -313,8 +286,7 @@ class RetinaFace(nn.Module):
             in_channels_stage2 * 2,
             in_channels_stage2 * 4,
             in_channels_stage2 * 8,
-        ]
-        # [512, 1024, 2048]
+        ]  # [512, 1024, 2048]
 
         out_channels = 256
         self.fpn = FPN(in_channels_list, out_channels)
@@ -326,9 +298,11 @@ class RetinaFace(nn.Module):
         self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
         self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
 
-    def forward_x(self, inputs):
-        # inputs.size() -- [1, 3, 640, 1013], range in [-255, 255]
-        out = self.body(inputs)
+    def forward_x(self, bgr_image):
+        # bgr_image.size() -- [1, 3, 640, 1013]
+        # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
+
+        out = self.body(bgr_image)
         # len(out), out.keys() -- (3, odict_keys([1, 2, 3]))
         out = list(out.values())
 
@@ -361,88 +335,47 @@ class RetinaFace(nn.Module):
 
         return output
 
-    def __detect_faces(self, inputs):
-        # get scale
-        # inputs -- range [-255.0, 255.0]
-        height, width = inputs.shape[2:]
-        self.scale = torch.tensor([width, height, width, height], dtype=torch.float32).to(device)
-        tmp = [width, height] * 5  # width, height, width, height, width, height, width, height]
-        self.scale1 = torch.tensor(tmp, dtype=torch.float32).to(inputs.device)
+    def forward(self, x):
+        bgr_image = x[:, [2, 1, 0], :, :]  # change channel from RGB to BGR
 
-        # forawrd
-        loc, conf, landmarks = self.forward_x(inputs)
+        B, C, H, W = bgr_image.shape
+        mean_tensor = torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1).to(bgr_image.device)
+        # mean_tensor = torch.tensor([104., 117., 123.])
+        # 0.485, 0.456, 0.406 -- RGB ==> 104(B), 117(G), 123(R) == BGR
 
+        bgr_image = bgr_image - mean_tensor
+        bgr_image = bgr_image * 255.0
+        # ==> bgr_image.dtype -- torch.float32, [-123.0, 151.0]
+
+        loc, conf, landmarks = self.forward_x(bgr_image)
         # (Pdb) loc.size() -- [1, 26720, 4]
         # (Pdb) conf.size() -- [1, 26720, 2]
         # (Pdb) landmarks.size() -- [1, 26720, 10]
 
-        # get priorbox
-        # xxxx8888
-        priorbox = PriorBox(self.cfg, image_size=inputs.shape[2:])  # [640, 1013]
-        priors = priorbox.forward().to(inputs.device)
-        # priors.size() -- [26720, 4]
+        priors = prior_box(H=H, W=W).to(bgr_image.device)  # [26720, 4]
 
-        return loc, conf, landmarks, priors
+        boxes = decode_boxes(loc.squeeze(0), priors, [0.1, 0.2])
+        boxes = boxes * torch.tensor([W, H, W, H], dtype=torch.float32).to(bgr_image.device)
+        # boxes.size() -- [28952, 4]
 
-    # single image detection
-    def transform(self, image):
-        # image.shape -- (640, 1013, 3)
-
-        image = image.transpose(2, 0, 1)  # (3, 640, 1013)
-        image = torch.from_numpy(image).unsqueeze(0)
-
-        return image
-
-    def detect_faces(
-        self,
-        image,
-        conf_threshold=0.8,
-        nms_threshold=0.4,
-    ):
-        """
-        xxxx8888
-
-        Params:
-            imgs: BGR image
-        """
-        # image.shape -- (640, 1013, 3)
-
-        image = self.transform(image)
-
-        image = image - torch.tensor([[[[104.0]], [[117.0]], [[123.0]]]]).to(image.device)
-        # self.mean_tensor.size() -- [1, 3, 1, 1] --- 104, 117, 123
-
-        loc, conf, landmarks, priors = self.__detect_faces(image)
-
-        boxes = decode_boxes(loc.data.squeeze(0), priors.data, [0.1, 0.2])
-        boxes = boxes * self.scale
-        boxes = boxes.cpu().numpy()
-
-        scores = conf.squeeze(0).data.cpu().numpy()[:, 1]
-
+        scores = conf.squeeze(0)[:, 1]  # [28952]
         landmarks = decode_landms(landmarks.squeeze(0), priors, [0.1, 0.2])
-        landmarks = landmarks * self.scale1
-        landmarks = landmarks.cpu().numpy()
+        landmarks = landmarks * torch.tensor([W, H] * 5, dtype=torch.float32).to(bgr_image.device)
+        # landmarks.size() -- [28952, 10]
 
-        # ignore low scores
-        inds = np.where(scores > conf_threshold)[0]
+        # Filter low scores
+        conf_threshold = 0.8
+        inds = torch.where(conf.squeeze(0)[:, 1] > conf_threshold)[0]  #  -- torch.int64
         boxes, landmarks, scores = boxes[inds], landmarks[inds], scores[inds]
+        # boxes.size() -- [57, 4], scores.size() -- [57], landmarks.size() -- [57, 10]
 
-        # sort
-        order = scores.argsort()[::-1]
+        # Sort scores
+        order = scores.argsort(descending=True)
         boxes, landmarks, scores = boxes[order], landmarks[order], scores[order]
 
         # do NMS
-        # boxes.shape -- (77, 4)
-        # scores[:, np.newaxis].shape -- (77, 1)
-        bounding_boxes = np.hstack((boxes, scores[:, np.newaxis])).astype(np.float32, copy=False)
-        keep = py_cpu_nms(bounding_boxes, nms_threshold)
-        bounding_boxes, landmarks = bounding_boxes[keep, :], landmarks[keep]
-        # self.t['forward_pass'].toc()
-        # print(self.t['forward_pass'].average_time)
-        # import sys
-        # sys.stdout.flush()
+        nms_threshold = 0.4
+        keep = nms(boxes, scores, nms_threshold)
+        boxes, landmarks, scores = boxes[keep], landmarks[keep], scores[keep]
 
-        # bounding_boxes.shape -- (4, 5)
-        # landmarks.shape -- (4, 10)
-        return np.concatenate((bounding_boxes, landmarks), axis=1)
+        return torch.cat((boxes, scores[:, None], landmarks), dim=1)  # [2, 15]

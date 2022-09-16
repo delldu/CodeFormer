@@ -126,7 +126,8 @@ class RetinaFace(nn.Module):
         self.eval()
 
     def forward_x(self, inputs):
-         # inputs.size() -- [1, 3, 640, 1013], range in [-255, 255]
+        # inputs.dtype -- torch.float32, [-123.0, 151.0], BGR | BGRA
+        # inputs.size() -- [1, 3, 640, 1013]
         out = self.body(inputs)
         # len(out), out.keys() -- (3, odict_keys([1, 2, 3]))
 
@@ -161,32 +162,9 @@ class RetinaFace(nn.Module):
 
         return output
 
-    def __detect_faces(self, inputs):
-        # get scale
-        # inputs -- range [-255.0, 255.0]
-        height, width = inputs.shape[2:]
-        self.scale = torch.tensor([width, height, width, height], dtype=torch.float32).to(device)
-        tmp = [width, height] * 5 # width, height, width, height, width, height, width, height]
-        self.scale1 = torch.tensor(tmp, dtype=torch.float32).to(device)
-
-        # forawrd
-        inputs = inputs.to(device)
-        loc, conf, landmarks = self.forward_x(inputs)
-
-        # (Pdb) loc.size() -- [1, 26720, 4]
-        # (Pdb) conf.size() -- [1, 26720, 2]
-        # (Pdb) landmarks.size() -- [1, 26720, 10]
-        
-        # get priorbox
-        priorbox = PriorBox(self.cfg, image_size=inputs.shape[2:]) # [640, 1013]
-        priors = priorbox.forward().to(device)
-        # priors.size() -- [26720, 4]
-
-        return loc, conf, landmarks, priors
-
     # single image detection
     def transform(self, image):
-        # image.shape -- (640, 1013, 3)
+        # image.shape -- (640, 1013, 3), BGR uint8
 
         image = image.transpose(2, 0, 1) # (3, 640, 1013)
         image = torch.from_numpy(image).unsqueeze(0)
@@ -203,26 +181,45 @@ class RetinaFace(nn.Module):
         xxxx8888
                 
         Params:
-            imgs: BGR image
+            imgs: BGR | BGRA image, uint8
         """
         # image.shape -- (640, 1013, 3)
 
-        image = self.transform(image)
+        image = self.transform(image) # BGR | BGRA, uint8 ==> torch uint8, 1x3xHxW
         image = image.to(device)
+        # image.dtype -- torch.float32, [-123.0, 151.0], BGR | BGRA
 
         image = image - self.mean_tensor
-        # self.mean_tensor.size() -- [1, 3, 1, 1] --- 104, 117, 123
+        # 0.485, 0.456, 0.406 -- RGB ???
+        # self.mean_tensor.size() -- [1, 3, 1, 1] --- 104(B), 117(G), 123(R) ==> BGR
+        # ==> image.dtype -- torch.float32, [-123.0, 151.0]
 
-        loc, conf, landmarks, priors = self.__detect_faces(image)
+        height, width = image.shape[2:]
+        self.scale = torch.tensor([width, height, width, height], dtype=torch.float32).to(device)
+        tmp = [width, height] * 5 # width, height, width, height, width, height, width, height]
+        self.scale1 = torch.tensor(tmp, dtype=torch.float32).to(device)
+
+        # forawrd
+        image = image.to(device)
+        loc, conf, landmarks = self.forward_x(image)
+
+        # (Pdb) loc.size() -- [1, 26720, 4]
+        # (Pdb) conf.size() -- [1, 26720, 2]
+        # (Pdb) landmarks.size() -- [1, 26720, 10]
+        
+        # get priorbox
+        priorbox = PriorBox(self.cfg, image_size=image.shape[2:]) # [640, 1013]
+        priors = priorbox.forward().to(device)
+        # priors.size() -- [26720, 4]
 
         # self.cfg['variance'] -- [0.1, 0.2]
-        boxes = decode(loc.data.squeeze(0), priors.data, self.cfg['variance'])
+        boxes = decode(loc.data.squeeze(0), priors.data, [0.1, 0.2])
         boxes = boxes * self.scale
         boxes = boxes.cpu().numpy()
 
         scores = conf.squeeze(0).data.cpu().numpy()[:, 1]
 
-        landmarks = decode_landm(landmarks.squeeze(0), priors, self.cfg['variance'])
+        landmarks = decode_landm(landmarks.squeeze(0), priors, [0.1, 0.2])
         landmarks = landmarks * self.scale1
         landmarks = landmarks.cpu().numpy()
 

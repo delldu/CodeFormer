@@ -7,7 +7,7 @@ import threading
 import torch
 from basicsr.utils.download_util import load_file_from_url
 from torch.nn import functional as F
-
+import pdb
 # ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -172,6 +172,8 @@ class RealESRGANer():
 
     @torch.no_grad()
     def enhance(self, img, outscale=None, alpha_upsampler='realesrgan'):
+        # image BGR, dtype=uint8
+
         h_input, w_input = img.shape[0:2]
         # img: numpy
         img = img.astype(np.float32)
@@ -192,19 +194,22 @@ class RealESRGANer():
             if alpha_upsampler == 'realesrgan':
                 alpha = cv2.cvtColor(alpha, cv2.COLOR_GRAY2RGB)
         else:
-            img_mode = 'RGB'
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_mode = 'RGB' # True
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # RGB, [0.0, 1.0]
 
         # ------------------- process image (without the alpha channel) ------------------- #
+        # img ==> RGB, uint8        
         with torch.no_grad():
             self.pre_process(img)
-            if self.tile_size > 0:
+            if self.tile_size > 0: # False
                 self.tile_process()
             else:
                 self.process()
             output_img_t = self.post_process()
+
+
             output_img = output_img_t.data.squeeze().float().cpu().clamp_(0, 1).numpy()
-            output_img = np.transpose(output_img[[2, 1, 0], :, :], (1, 2, 0))
+            output_img = np.transpose(output_img[[2, 1, 0], :, :], (1, 2, 0)) # ==> BGR
             if img_mode == 'L':
                 output_img = cv2.cvtColor(output_img, cv2.COLOR_BGR2GRAY)
         del output_img_t
@@ -220,7 +225,7 @@ class RealESRGANer():
                     self.process()
                 output_alpha = self.post_process()
                 output_alpha = output_alpha.data.squeeze().float().cpu().clamp_(0, 1).numpy()
-                output_alpha = np.transpose(output_alpha[[2, 1, 0], :, :], (1, 2, 0))
+                output_alpha = np.transpose(output_alpha[[2, 1, 0], :, :], (1, 2, 0)) # BGR
                 output_alpha = cv2.cvtColor(output_alpha, cv2.COLOR_BGR2GRAY)
             else:  # use the cv2 resize for alpha channel
                 h, w = alpha.shape[0:2]
@@ -243,7 +248,7 @@ class RealESRGANer():
                     int(h_input * outscale),
                 ), interpolation=cv2.INTER_LANCZOS4)
 
-        return output, img_mode
+        return output, img_mode # ==> BGR or BGRA format !!!
 
 
 class PrefetchReader(threading.Thread):
