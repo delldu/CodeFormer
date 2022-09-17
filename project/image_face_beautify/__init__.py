@@ -99,7 +99,8 @@ def image_predict(input_files, output_dir):
         progress_bar.update(1)
 
         # orig input
-        input_tensor = todos.data.load_rgba_tensor(filename)
+        # input_tensor = todos.data.load_rgba_tensor(filename)
+        input_tensor = todos.data.load_tensor(filename)
 
         print(filename)
 

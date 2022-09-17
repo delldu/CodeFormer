@@ -102,10 +102,7 @@ class RRDBNet(nn.Module):
 
         self.lrelu = nn.LeakyReLU(negative_slope=0.2, inplace=True)
 
-    def forward(self, input):
-        x = input[:, 0:3, :, :]
-        alpha = input[:, 3:, :, :]
-
+    def forward(self, x):
         if self.scale == 2:
             feat = pixel_unshuffle(x, scale=2)
         elif self.scale == 1:
@@ -120,7 +117,4 @@ class RRDBNet(nn.Module):
         feat = self.lrelu(self.conv_up2(F.interpolate(feat, scale_factor=2.0, mode="bicubic", align_corners=True)))
         out = self.conv_last(self.lrelu(self.conv_hr(feat)))
 
-        if self.scale > 1:
-            alpha = F.interpolate(alpha, scale_factor=float(self.scale), mode="bicubic", align_corners=True)
-
-        return torch.cat((out.clamp(0.0, 1.0), alpha), dim=1)
+        return out.clamp(0.0, 1.0)

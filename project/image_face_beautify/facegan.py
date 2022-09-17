@@ -14,9 +14,9 @@ import math
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
-
 from typing import Optional, List
 
+import pdb
 
 def normalize(in_channels):
     return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
@@ -517,7 +517,7 @@ class Fuse_sft_block(nn.Module):
         enc_feat = self.encode_enc(torch.cat([enc_feat, dec_feat], dim=1))
         scale = self.scale(enc_feat)
         shift = self.shift(enc_feat)
-        w = 1.0
+        w = 0.5
         residual = w * (dec_feat * scale + shift)
         out = dec_feat + residual
         return out
@@ -590,6 +590,8 @@ class CodeFormer(VQAutoEncoder):
             module.weight.data.fill_(1.0)
 
     def forward(self, x, detach_16=True, code_only=False):
+        x = (x - 0.5)/0.5 # normal
+
         # ################### Encoder #####################
         enc_feat_dict = {}
         out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
@@ -638,11 +640,15 @@ class CodeFormer(VQAutoEncoder):
         x = quant_feat
         fuse_list = [self.fuse_generator_block[f_size] for f_size in self.connect_list]
 
+        # len(self.generator.blocks) -- 25
         for i, block in enumerate(self.generator.blocks):
             x = block(x)
-            if i in fuse_list:  # fuse after i-th block
+            if i in fuse_list:  # #[9, 12, 15, 18], fuse after i-th block
                 f_size = str(x.shape[-1])
-                x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x, 0.5)  # w -- 0.5
+                x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x)  # w -- 0.5
         out = x
+
         # logits doesn't need softmax before cross_entropy loss
-        return out, logits, lq_feat
+        out = (out + 1.0)/2.0 # change from [-1.0, 1.0] to [0.0, 1.0]
+
+        return out.clamp(0.0, 1.0), logits, lq_feat

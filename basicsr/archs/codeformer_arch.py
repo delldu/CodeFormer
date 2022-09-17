@@ -8,6 +8,7 @@ from typing import Optional, List
 from basicsr.archs.vqgan_arch import *
 from basicsr.utils import get_root_logger
 from basicsr.utils.registry import ARCH_REGISTRY
+import pdb
 
 def calc_mean_std(feat, eps=1e-5):
     """Calculate mean and std for adaptive_instance_normalization.
@@ -164,7 +165,6 @@ class CodeFormer(VQAutoEncoder):
                 connect_list=['32', '64', '128', '256'],
                 fix_modules=['quantize','generator']):
         super(CodeFormer, self).__init__(512, 64, [1, 2, 2, 4, 4, 8], 'nearest',2, [16], codebook_size)
-
         if fix_modules is not None:
             for module in fix_modules:
                 for param in getattr(self, module).parameters():
@@ -217,6 +217,8 @@ class CodeFormer(VQAutoEncoder):
             module.weight.data.fill_(1.0)
 
     def forward(self, x, detach_16=True, code_only=False):
+        # x.size() -- [1, 3, 512, 512], [-1.0, 1.0]
+
         # ################### Encoder #####################
         enc_feat_dict = {}
         out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
@@ -240,7 +242,7 @@ class CodeFormer(VQAutoEncoder):
         logits = self.idx_pred_layer(query_emb) # (hw)bn
         logits = logits.permute(1,0,2) # (hw)bn -> b(hw)n
 
-        if code_only: # for training stage II
+        if code_only: # False for training stage II
           # logits doesn't need softmax before cross_entropy loss
             return logits, lq_feat
 
@@ -272,4 +274,6 @@ class CodeFormer(VQAutoEncoder):
                 x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x, 0.5) # w -- 0.5
         out = x
         # logits doesn't need softmax before cross_entropy loss
+        # out.size() -- [1, 3, 512, 512]
+
         return out, logits, lq_feat

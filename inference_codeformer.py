@@ -114,7 +114,9 @@ if __name__ == '__main__':
         for idx, cropped_face in enumerate(face_helper.cropped_faces):
             # prepare data
             cropped_face_t = img2tensor(cropped_face / 255., bgr2rgb=True, float32=True)
-            normalize(cropped_face_t, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
+            # normalize(cropped_face_t, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
+            cropped_face_t = (cropped_face_t - 0.5)/0.5
+
             cropped_face_t = cropped_face_t.unsqueeze(0).to(device)
 
             try:
