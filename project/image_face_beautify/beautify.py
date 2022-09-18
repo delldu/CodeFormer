@@ -74,7 +74,7 @@ def get_affine_image(image, matrix, OH, OW):
     return output
 
 
-def image_mask_erode(bin_img, ksize=5):
+def image_mask_erode(bin_img, ksize=7):
     if ksize % 2 == 0:
         ksize = ksize + 1
 
@@ -104,8 +104,21 @@ class BeautyModel(nn.Module):
         self.facegan = facegan.CodeFormer()
         self.bgzoom2x = rrdbnet.RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
 
+        kernel = torch.Tensor([[0.00078633, 0.00655965, 0.01330373, 0.00655965, 0.00078633],
+                  [0.00655965, 0.05472157, 0.11098164, 0.05472157, 0.00655965],
+                  [0.01330373, 0.11098164, 0.22508352, 0.11098164, 0.01330373],
+                  [0.00655965, 0.05472157, 0.11098164, 0.05472157, 0.00655965],
+                  [0.00078633, 0.00655965, 0.01330373, 0.00655965, 0.00078633]]).unsqueeze(0).unsqueeze(0)
+        pad = 5
+        face_mask = torch.ones((1, 1, STANDARD_FACE_SIZE - 4*pad, STANDARD_FACE_SIZE - 4*pad))
+        face_mask = F.pad(face_mask, [pad, pad, pad, pad], mode='constant', value=0.5)
+        face_mask = F.pad(face_mask, [pad, pad, pad, pad], mode='constant', value=0.0)
+        face_mask = F.conv2d(face_mask, kernel, padding=2, groups=1)
+        self.face_mask = nn.Parameter(data=face_mask, requires_grad=False)
+
         self.load_weights()
         # torch.save(self.state_dict(), "/tmp/image_face_beautify.pth")
+
 
     def load_weights(self):
         loadnet = torch.load("../weights/CodeFormer/codeformer.pth", map_location=torch.device("cpu"))
@@ -136,29 +149,23 @@ class BeautyModel(nn.Module):
 
         bg = self.bgzoom2x(x)
         B, C, H, W = bg.size()
-
-        face_mask = torch.ones((1, 1, STANDARD_FACE_SIZE, STANDARD_FACE_SIZE)).to(x.device)
-
-        face_locations = self.facedet(bg)  # box(4)-score(1)-landm(10), size() -- [2, 15]
+        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
 
         for i in range(face_locations.size(0)):
-            landmark = face_locations[i, 5:].view(-1, 2)
+            landmark = face_locations[i, 5:].view(-1, 2) # skip bbox, score
+
+            eye_dist = torch.abs(landmark[0,0] - landmark[1,0]).item()
+            if eye_dist < 5.0: # Skip strange face ...
+                continue
 
             M = get_affine_matrix(landmark, torch.Tensor(STANDARD_FACE_LANDMARKS).to(x.device))
-            input_face = get_affine_image(bg, M, STANDARD_FACE_SIZE, STANDARD_FACE_SIZE)
-            good_face = self.facegan(input_face)[0]
+            cropped_face = get_affine_image(bg, M, STANDARD_FACE_SIZE, STANDARD_FACE_SIZE)
+            refined_face = self.facegan(cropped_face)[0]
 
-            RM = get_affine_matrix(torch.Tensor(STANDARD_FACE_LANDMARKS).to(x.device), landmark)
-            pasted_face = get_affine_image(good_face, RM, H, W)
-            pasted_mask = get_affine_image(face_mask, RM, H, W)
+            RM = torch.linalg.inv(M) # get_affine_matrix(torch.Tensor(STANDARD_FACE_LANDMARKS).to(x.device), landmark)
+            pasted_face = get_affine_image(refined_face, RM, H, W)
+            pasted_mask = get_affine_image(self.face_mask, RM, H, W)
 
             bg = (1.0 - pasted_mask) * bg + pasted_mask * pasted_face
-
-            # output_file = f"/tmp/face_{i+1:03d}.png"
-            # todos.data.save_tensor([pasted_mask], output_file)
-
-        # output_file = f"/tmp/bg.png"
-        # todos.data.save_tensor([bg], output_file)
-        # pdb.set_trace()
 
         return bg
