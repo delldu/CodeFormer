@@ -11,17 +11,24 @@
 #
 
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-import torchvision.models as models
-from torchvision.models._utils import IntermediateLayerGetter as IntermediateLayerGetter
+from . import resnet
+
+# import torchvision.models as models
+# from torchvision.models._utils import IntermediateLayerGetter as IntermediateLayerGetter
+from typing import List, Dict
+from . import resnet
+
 import math
 import numpy as np
 import pdb
 
+
 # Adapted from https://github.com/Hakuyume/chainer-ssd
-def decode_boxes(loc, priors, variances):
+def decode_boxes(loc, priors, variances: List[float]):
     """Decode locations from predictions using priors"""
 
     boxes = torch.cat(
@@ -36,7 +43,7 @@ def decode_boxes(loc, priors, variances):
     return boxes
 
 
-def decode_landms(pre, priors, variances):
+def decode_landms(pre, priors, variances: List[float]):
     """Decode landm from predictions using priors"""
     tmp = (
         priors[:, :2] + pre[:, :2] * variances[0] * priors[:, 2:],
@@ -54,7 +61,7 @@ def prior_box(H: int, W: int):
     steps = [8, 16, 32]
     feature_maps = [[math.ceil(H / s), math.ceil(W / s)] for s in steps]
 
-    anchors = []
+    anchors: List[float] = []
     for k, f in enumerate(feature_maps):
         k_sizes = min_sizes[k]
         for i in range(f[0]):
@@ -66,10 +73,11 @@ def prior_box(H: int, W: int):
                     cy = (i + 0.5) * steps[k] / H
                     anchors += [cx, cy, s_kx, s_ky]
 
-    return torch.Tensor(anchors).view(-1, 4)
+    # return torch.Tensor(anchors).view(-1, 4)
+    return torch.tensor(anchors).view(-1, 4)  # torch.jit.script only support torch.tensor
 
 
-def nms(boxes, scores, thresh):
+def nms(boxes, scores, thresh: float):
     """NMS"""
     keep = torchvision.ops.nms(
         boxes=boxes,
@@ -110,7 +118,7 @@ def nms(boxes, scores, thresh):
 #     return keep
 
 
-def conv_bn(inp, oup, stride=1, leaky=0):
+def conv_bn(inp, oup, stride=1, leaky: float = 0.0):
     return nn.Sequential(
         nn.Conv2d(inp, oup, 3, stride, 1, bias=False),
         nn.BatchNorm2d(oup),
@@ -125,7 +133,7 @@ def conv_bn_no_relu(inp, oup, stride):
     )
 
 
-def conv_bn1X1(inp, oup, stride, leaky=0):
+def conv_bn1X1(inp, oup, stride, leaky: float = 0.0):
     return nn.Sequential(
         nn.Conv2d(inp, oup, 1, stride, padding=0, bias=False),
         nn.BatchNorm2d(oup),
@@ -133,22 +141,22 @@ def conv_bn1X1(inp, oup, stride, leaky=0):
     )
 
 
-def conv_dw(inp, oup, stride, leaky=0.1):
-    return nn.Sequential(
-        nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
-        nn.BatchNorm2d(inp),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True),
-        nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-        nn.BatchNorm2d(oup),
-        nn.LeakyReLU(negative_slope=leaky, inplace=True),
-    )
+# def conv_dw(inp, oup, stride, leaky:float=0.1):
+#     return nn.Sequential(
+#         nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
+#         nn.BatchNorm2d(inp),
+#         nn.LeakyReLU(negative_slope=leaky, inplace=True),
+#         nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
+#         nn.BatchNorm2d(oup),
+#         nn.LeakyReLU(negative_slope=leaky, inplace=True),
+#     )
 
 
 class SSH(nn.Module):
     def __init__(self, in_channel, out_channel):
         super(SSH, self).__init__()
         assert out_channel % 4 == 0
-        leaky = 0
+        leaky = 0.0
         if out_channel <= 64:
             leaky = 0.1
         self.conv3X3 = conv_bn_no_relu(in_channel, out_channel // 2, stride=1)
@@ -176,7 +184,7 @@ class SSH(nn.Module):
 class FPN(nn.Module):
     def __init__(self, in_channels_list, out_channels):
         super(FPN, self).__init__()
-        leaky = 0
+        leaky = 0.0
         if out_channels <= 64:
             leaky = 0.1
         self.output1 = conv_bn1X1(in_channels_list[0], out_channels, stride=1, leaky=leaky)
@@ -186,7 +194,7 @@ class FPN(nn.Module):
         self.merge1 = conv_bn(out_channels, out_channels, leaky=leaky)
         self.merge2 = conv_bn(out_channels, out_channels, leaky=leaky)
 
-    def forward(self, input):
+    def forward(self, input: List[Tensor]) -> List[Tensor]:
         # names = list(input.keys())
         # input = list(input.values())
 
@@ -203,6 +211,7 @@ class FPN(nn.Module):
         output1 = self.merge1(output1)
 
         out = [output1, output2, output3]
+        # xxxx8888
         return out
 
 
@@ -267,19 +276,8 @@ def make_landmark_head(fpn_num=3, inchannels=64, anchor_num=2):
 class RetinaFace(nn.Module):
     def __init__(self, phase="test"):
         super(RetinaFace, self).__init__()
-
-        # cfg -- {'name': 'Resnet50', 'min_sizes': [[16, 32], [64, 128], [256, 512]],
-        # 'steps': [8, 16, 32], 'variance': [0.1, 0.2], 'clip': False,
-        # 'loc_weight': 2.0, 'gpu_train': True, 'batch_size': 24, 'ngpu': 4,
-        # 'epoch': 100, 'decay1': 70, 'decay2': 90, 'image_size': 840,
-        # 'return_layers': {'layer2': 1, 'layer3': 2, 'layer4': 3},
-        # 'in_channel': 256, 'out_channel': 256}
-
         self.phase = phase
-
-        # Build network.
-        backbone = models.resnet50(pretrained=False)
-        self.body = IntermediateLayerGetter(backbone, {"layer2": 1, "layer3": 2, "layer4": 3})
+        self.body = resnet.resnet50_3layers()
 
         in_channels_stage2 = 256
         in_channels_list = [
@@ -298,13 +296,12 @@ class RetinaFace(nn.Module):
         self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
         self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
 
-    def forward_x(self, bgr_image):
+    def forward_x(self, bgr_image) -> List[Tensor]:
         # bgr_image.size() -- [1, 3, 640, 1013]
         # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
         out = self.body(bgr_image)
-        # len(out), out.keys() -- (3, odict_keys([1, 2, 3]))
-        out = list(out.values())
+        # len(out) -- 3
 
         # FPN
         fpn = self.fpn(out)
@@ -315,14 +312,28 @@ class RetinaFace(nn.Module):
         feature3 = self.ssh3(fpn[2])
         features = [feature1, feature2, feature3]
 
-        bbox_regressions = torch.cat([self.BboxHead[i](feature) for i, feature in enumerate(features)], dim=1)
-        classifications = torch.cat([self.ClassHead[i](feature) for i, feature in enumerate(features)], dim=1)
-        tmp = [self.LandmarkHead[i](feature) for i, feature in enumerate(features)]
-        ldm_regressions = torch.cat(tmp, dim=1)
+        # bbox_regressions = torch.cat([self.BboxHead[i](feature) for i, feature in enumerate(features)], dim=1)
+        outs = []
+        for i, head in enumerate(self.BboxHead):
+            outs.append(head(features[i]))
+        bbox_regressions = torch.cat(outs, dim=1)
 
-        # bbox_regressions.shape -- torch.Size([1, 26720, 4])
-        # classifications.shape -- torch.Size([1, 26720, 2])
-        # ldm_regressions.shape -- torch.Size([1, 26720, 10])
+        # classifications = torch.cat([self.ClassHead[i](feature) for i, feature in enumerate(features)], dim=1)
+        outs = []
+        for i, head in enumerate(self.ClassHead):
+            outs.append(head(features[i]))
+        classifications = torch.cat(outs, dim=1)
+
+        # tmp = [self.LandmarkHead[i](feature) for i, feature in enumerate(features)]
+        # ldm_regressions = torch.cat(tmp, dim=1)
+        outs = []
+        for i, head in enumerate(self.LandmarkHead):
+            outs.append(head(features[i]))
+        ldm_regressions = torch.cat(outs, dim=1)
+
+        # bbox_regressions.shape -- [1, 26720, 4]
+        # classifications.shape -- [1, 26720, 2]
+        # ldm_regressions.shape -- [1, 26720, 10]
 
         if self.phase == "train":
             output = (bbox_regressions, classifications, ldm_regressions)

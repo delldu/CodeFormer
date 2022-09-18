@@ -18,6 +18,7 @@ from typing import Optional, List
 
 import pdb
 
+
 def normalize(in_channels):
     return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
 
@@ -98,32 +99,32 @@ class VectorQuantizer(nn.Module):
         return z_q
 
 
-class GumbelQuantizer(nn.Module):
-    def __init__(self, codebook_size, emb_dim, num_hiddens, straight_through=False, kl_weight=5e-4, temp_init=1.0):
-        super().__init__()
-        self.codebook_size = codebook_size  # number of embeddings
-        self.emb_dim = emb_dim  # dimension of embedding
-        self.straight_through = straight_through
-        self.temperature = temp_init
-        self.kl_weight = kl_weight
-        self.proj = nn.Conv2d(num_hiddens, codebook_size, 1)  # projects last encoder layer to quantized logits
-        self.embed = nn.Embedding(codebook_size, emb_dim)
+# class GumbelQuantizer(nn.Module):
+#     def __init__(self, codebook_size, emb_dim, num_hiddens, straight_through=False, kl_weight=5e-4, temp_init=1.0):
+#         super().__init__()
+#         self.codebook_size = codebook_size  # number of embeddings
+#         self.emb_dim = emb_dim  # dimension of embedding
+#         self.straight_through = straight_through
+#         self.temperature = temp_init
+#         self.kl_weight = kl_weight
+#         self.proj = nn.Conv2d(num_hiddens, codebook_size, 1)  # projects last encoder layer to quantized logits
+#         self.embed = nn.Embedding(codebook_size, emb_dim)
 
-    def forward(self, z):
-        hard = self.straight_through if self.training else True
+#     def forward(self, z):
+#         hard = self.straight_through if self.training else True
 
-        logits = self.proj(z)
+#         logits = self.proj(z)
 
-        soft_one_hot = F.gumbel_softmax(logits, tau=self.temperature, dim=1, hard=hard)
+#         soft_one_hot = F.gumbel_softmax(logits, tau=self.temperature, dim=1, hard=hard)
 
-        z_q = torch.einsum("b n h w, n d -> b d h w", soft_one_hot, self.embed.weight)
+#         z_q = torch.einsum("b n h w, n d -> b d h w", soft_one_hot, self.embed.weight)
 
-        # + kl divergence to the prior loss
-        qy = F.softmax(logits, dim=1)
-        diff = self.kl_weight * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
-        min_encoding_indices = soft_one_hot.argmax(dim=1)
+#         # + kl divergence to the prior loss
+#         qy = F.softmax(logits, dim=1)
+#         diff = self.kl_weight * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
+#         min_encoding_indices = soft_one_hot.argmax(dim=1)
 
-        return z_q, diff, {"min_encoding_indices": min_encoding_indices}
+#         return z_q, diff, {"min_encoding_indices": min_encoding_indices}
 
 
 class Downsample(nn.Module):
@@ -324,9 +325,9 @@ class VQAutoEncoder(nn.Module):
         codebook_size=1024,
         emb_dim=256,
         beta=0.25,
-        gumbel_straight_through=False,
-        gumbel_kl_weight=1e-8,
-        model_path=None,
+        # gumbel_straight_through=False,
+        # gumbel_kl_weight=1e-8,
+        # model_path=None,
     ):
         super().__init__()
         self.in_channels = 3
@@ -347,16 +348,20 @@ class VQAutoEncoder(nn.Module):
             self.resolution,
             self.attn_resolutions,
         )
-        if self.quantizer_type == "nearest":
-            self.beta = beta  # 0.25
-            self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
-        elif self.quantizer_type == "gumbel":
-            self.gumbel_num_hiddens = emb_dim
-            self.straight_through = gumbel_straight_through
-            self.kl_weight = gumbel_kl_weight
-            self.quantize = GumbelQuantizer(
-                self.codebook_size, self.embed_dim, self.gumbel_num_hiddens, self.straight_through, self.kl_weight
-            )
+        # print("VQAutoEncoder ------ quantizer_type: ", self.quantizer_type)
+
+        # if self.quantizer_type == "nearest":
+        #     self.beta = beta  # 0.25
+        #     self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
+        # elif self.quantizer_type == "gumbel":
+        #     self.gumbel_num_hiddens = emb_dim
+        #     self.straight_through = gumbel_straight_through
+        #     self.kl_weight = gumbel_kl_weight
+        #     self.quantize = GumbelQuantizer(
+        #         self.codebook_size, self.embed_dim, self.gumbel_num_hiddens, self.straight_through, self.kl_weight
+        #     )
+        self.beta = beta  # 0.25
+        self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
         self.generator = Generator(
             self.nf, self.embed_dim, self.ch_mult, self.n_blocks, self.resolution, self.attn_resolutions
         )
@@ -400,49 +405,6 @@ def adaptive_instance_normalization(content_feat, style_feat):
     content_mean, content_std = calc_mean_std(content_feat)
     normalized_feat = (content_feat - content_mean.expand(size)) / content_std.expand(size)
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
-
-
-# class PositionEmbeddingSine(nn.Module):
-#     """
-#     This is a more standard version of the position embedding, very similar to the one
-#     used by the Attention is all you need paper, generalized to work on images.
-#     """
-
-#     def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
-#         super().__init__()
-#         self.num_pos_feats = num_pos_feats
-#         self.temperature = temperature
-#         self.normalize = normalize
-#         if scale is not None and normalize is False:
-#             raise ValueError("normalize should be True if scale is passed")
-#         if scale is None:
-#             scale = 2 * math.pi
-#         self.scale = scale
-
-#     def forward(self, x, mask=None):
-#         if mask is None:
-#             mask = torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool)
-#         not_mask = ~mask
-#         y_embed = not_mask.cumsum(1, dtype=torch.float32)
-#         x_embed = not_mask.cumsum(2, dtype=torch.float32)
-#         if self.normalize:
-#             eps = 1e-6
-#             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
-#             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
-
-#         dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
-#         dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
-
-#         pos_x = x_embed[:, :, :, None] / dim_t
-#         pos_y = y_embed[:, :, :, None] / dim_t
-#         pos_x = torch.stack(
-#             (pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4
-#         ).flatten(3)
-#         pos_y = torch.stack(
-#             (pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4
-#         ).flatten(3)
-#         pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
-#         return pos
 
 
 def _get_activation_fn(activation):
@@ -496,31 +458,31 @@ class TransformerSALayer(nn.Module):
         return tgt
 
 
-class Fuse_sft_block(nn.Module):
-    def __init__(self, in_ch, out_ch):
-        super().__init__()
-        self.encode_enc = ResBlock(2 * in_ch, out_ch)
+# class Fuse_sft_block(nn.Module):
+#     def __init__(self, in_ch, out_ch):
+#         super().__init__()
+#         self.encode_enc = ResBlock(2 * in_ch, out_ch)
 
-        self.scale = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
-        )
+#         self.scale = nn.Sequential(
+#             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2, True),
+#             nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
+#         )
 
-        self.shift = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2, True),
-            nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
-        )
+#         self.shift = nn.Sequential(
+#             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
+#             nn.LeakyReLU(0.2, True),
+#             nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
+#         )
 
-    def forward(self, enc_feat, dec_feat):
-        enc_feat = self.encode_enc(torch.cat([enc_feat, dec_feat], dim=1))
-        scale = self.scale(enc_feat)
-        shift = self.shift(enc_feat)
-        w = 0.5
-        residual = w * (dec_feat * scale + shift)
-        out = dec_feat + residual
-        return out
+#     def forward(self, enc_feat, dec_feat):
+#         enc_feat = self.encode_enc(torch.cat([enc_feat, dec_feat], dim=1))
+#         scale = self.scale(enc_feat)
+#         shift = self.shift(enc_feat)
+#         w = 0.5
+#         residual = w * (dec_feat * scale + shift)
+#         out = dec_feat + residual
+#         return out
 
 
 class CodeFormer(VQAutoEncoder):
@@ -536,10 +498,13 @@ class CodeFormer(VQAutoEncoder):
     ):
         super(CodeFormer, self).__init__(512, 64, [1, 2, 2, 4, 4, 8], "nearest", 2, [16], codebook_size)
 
-        if fix_modules is not None:
-            for module in fix_modules:
-                for param in getattr(self, module).parameters():
-                    param.requires_grad = False
+        # if fix_modules is not None:
+        #     for module in fix_modules:
+        #         for param in getattr(self, module).parameters():
+        #             param.requires_grad = False
+        for module in fix_modules:
+            for param in getattr(self, module).parameters():
+                param.requires_grad = False
 
         self.connect_list = connect_list
         self.n_layers = n_layers
@@ -560,25 +525,30 @@ class CodeFormer(VQAutoEncoder):
         # logits_predict head
         self.idx_pred_layer = nn.Sequential(nn.LayerNorm(dim_embd), nn.Linear(dim_embd, codebook_size, bias=False))
 
-        self.channels = {
-            "16": 512,
-            "32": 256,
-            "64": 256,
-            "128": 128,
-            "256": 128,
-            "512": 64,
-        }
+        # xxxx3333
+        # self.channels = {
+        #     "16": 512,
+        #     "32": 256,
+        #     "64": 256,
+        #     "128": 128,
+        #     "256": 128,
+        #     "512": 64,
+        # }
 
         # after second residual block for > 16, before attn layer for ==16
-        self.fuse_encoder_block = {"512": 2, "256": 5, "128": 8, "64": 11, "32": 14, "16": 18}
+        # xxxx3333
+        # self.fuse_encoder_block = {"512": 2, "256": 5, "128": 8, "64": 11, "32": 14, "16": 18}
         # after first residual block for > 16, before attn layer for ==16
-        self.fuse_generator_block = {"16": 6, "32": 9, "64": 12, "128": 15, "256": 18, "512": 21}
+
+        # xxxx3333
+        # self.fuse_generator_block = {"16": 6, "32": 9, "64": 12, "128": 15, "256": 18, "512": 21}
 
         # fuse_convs_dict
-        self.fuse_convs_dict = nn.ModuleDict()
-        for f_size in self.connect_list:
-            in_ch = self.channels[f_size]
-            self.fuse_convs_dict[f_size] = Fuse_sft_block(in_ch, in_ch)
+        # xxxx3333
+        # self.fuse_convs_dict = nn.ModuleDict()
+        # for f_size in self.connect_list:
+        #     in_ch = self.channels[f_size]
+        #     self.fuse_convs_dict[f_size] = Fuse_sft_block(in_ch, in_ch)
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -589,24 +559,26 @@ class CodeFormer(VQAutoEncoder):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x, detach_16=True, code_only=False):
-        x = (x - 0.5)/0.5 # normal
+    def forward(self, x):
+        x = (x - 0.5) / 0.5  # normal
 
         # ################### Encoder #####################
-        enc_feat_dict = {}
-        out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
+        # xxxx3333
+        # enc_feat_dict = {}
+        # out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
         for i, block in enumerate(self.encoder.blocks):
             x = block(x)
-            if i in out_list:
-                enc_feat_dict[str(x.shape[-1])] = x.clone()
+            # xxxx3333
+            # if i in out_list:
+            #     enc_feat_dict[str(x.shape[-1])] = x.clone()
 
         lq_feat = x
         # ################# Transformer ###################
-        # quant_feat, codebook_loss, quant_stats = self.quantize(lq_feat)
         pos_emb = self.position_emb.unsqueeze(1).repeat(1, x.shape[0], 1)
         # BCHW -> BC(HW) -> (HW)BC
         feat_emb = self.feat_emb(lq_feat.flatten(2).permute(2, 0, 1))
         query_emb = feat_emb
+
         # Transformer encoder
         for layer in self.ft_layers:
             query_emb = layer(query_emb, query_pos=pos_emb)
@@ -615,40 +587,30 @@ class CodeFormer(VQAutoEncoder):
         logits = self.idx_pred_layer(query_emb)  # (hw)bn
         logits = logits.permute(1, 0, 2)  # (hw)bn -> b(hw)n
 
-        if code_only:  # for training stage II
-            # logits doesn't need softmax before cross_entropy loss
-            return logits, lq_feat
-
-        # ################# Quantization ###################
-        # if self.training:
-        #     quant_feat = torch.einsum('btn,nc->btc', [soft_one_hot, self.quantize.embedding.weight])
-        #     # b(hw)c -> bc(hw) -> bchw
-        #     quant_feat = quant_feat.permute(0,2,1).view(lq_feat.shape)
-        # ------------
         soft_one_hot = F.softmax(logits, dim=2)
         _, top_idx = torch.topk(soft_one_hot, 1, dim=2)
         quant_feat = self.quantize.get_codebook_feat(top_idx, shape=[x.shape[0], 16, 16, 256])
-        # preserve gradients
-        # quant_feat = lq_feat + (quant_feat - lq_feat).detach()
 
-        if detach_16:  # True
-            quant_feat = quant_feat.detach()  # for training stage III
+        # if detach_16:  # True
+        #     quant_feat = quant_feat.detach()  # for training stage III
 
         quant_feat = adaptive_instance_normalization(quant_feat, lq_feat)
 
         # ################## Generator ####################
         x = quant_feat
-        fuse_list = [self.fuse_generator_block[f_size] for f_size in self.connect_list]
+        # xxxx3333
+        # fuse_list = [self.fuse_generator_block[f_size] for f_size in self.connect_list]
 
         # len(self.generator.blocks) -- 25
         for i, block in enumerate(self.generator.blocks):
             x = block(x)
-            if i in fuse_list:  # #[9, 12, 15, 18], fuse after i-th block
-                f_size = str(x.shape[-1])
-                x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x)  # w -- 0.5
+            # xxxx3333
+            # if i in fuse_list:  # [9, 12, 15, 18], fuse after i-th block
+            #     f_size = str(x.shape[-1])
+            #     x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x)  # w -- 0.5
         out = x
 
         # logits doesn't need softmax before cross_entropy loss
-        out = (out + 1.0)/2.0 # change from [-1.0, 1.0] to [0.0, 1.0]
+        out = (out + 1.0) / 2.0  # change from [-1.0, 1.0] to [0.0, 1.0]
 
-        return out.clamp(0.0, 1.0), logits, lq_feat
+        return out.clamp(0.0, 1.0)

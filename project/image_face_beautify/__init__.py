@@ -32,16 +32,15 @@ def get_model():
     checkpoint = model_path if cdir == "" else cdir + "/" + model_path
 
     model = beautify.BeautyModel()
-    # todos.model.load(model, checkpoint)
+    todos.model.load(model, checkpoint)
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
 
-    # model = torch.jit.script(model)
-
-    # todos.data.mkdir("output")
-    # if not os.path.exists("output/image_face_beautify.torch"):
-    #     model.save("output/image_face_beautify.torch")
+    todos.data.mkdir("output")
+    if not os.path.exists("output/image_face_beautify.torch"):
+        model = torch.jit.script(model)
+        model.save("output/image_face_beautify.torch")
 
     return model, device
 
