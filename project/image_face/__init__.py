@@ -151,7 +151,7 @@ def beauty_predict(input_files, output_dir):
         B, C, H, W = input_tensor.size()
         zoom2x_tensor = todos.data.resize_tensor(input_tensor, 2 * H, 2 * W)
         todos.data.save_tensor([zoom2x_tensor, predict_tensor], output_file)
-
+    todos.model.reset_device()
 
 def video_service(input_file, output_file, targ):
     # load video
@@ -233,3 +233,4 @@ def detect_predict(input_files, output_dir):
         else:
             grid_image = todos.data.grid_image(list(torch.split(predict_tensor, 1, dim=0)), nrow=2)
             grid_image.save(output_file)
+    todos.model.reset_device()
