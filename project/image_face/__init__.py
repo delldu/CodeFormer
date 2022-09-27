@@ -232,10 +232,7 @@ def detect_predict(input_files, output_dir):
         if predict_tensor.size(0) < 2:
             todos.data.save_tensor([predict_tensor], output_file)
         else:
-            n_row = int(math.sqrt(predict_tensor.size(0)))
-            if n_row * n_row < predict_tensor.size(0):
-                n_row = n_row + 1
-                
+            n_row = math.ceil(math.sqrt(predict_tensor.size(0)))
             if n_row % 2 != 0:
                 n_row = n_row + 1
             grid_image = todos.data.grid_image(list(torch.split(predict_tensor, 1, dim=0)), nrow=n_row)
