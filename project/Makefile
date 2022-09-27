@@ -13,7 +13,7 @@ install:
 	python setup.py install
 
 uninstall:
-	pip uninstall image_face_beautify
+	pip uninstall image_face
 
 clean:
-	rm -rf build dist image_face_beautify.egg-info __pycache__
+	rm -rf build dist image_face.egg-info __pycache__

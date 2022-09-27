@@ -99,34 +99,6 @@ class VectorQuantizer(nn.Module):
         return z_q
 
 
-# class GumbelQuantizer(nn.Module):
-#     def __init__(self, codebook_size, emb_dim, num_hiddens, straight_through=False, kl_weight=5e-4, temp_init=1.0):
-#         super().__init__()
-#         self.codebook_size = codebook_size  # number of embeddings
-#         self.emb_dim = emb_dim  # dimension of embedding
-#         self.straight_through = straight_through
-#         self.temperature = temp_init
-#         self.kl_weight = kl_weight
-#         self.proj = nn.Conv2d(num_hiddens, codebook_size, 1)  # projects last encoder layer to quantized logits
-#         self.embed = nn.Embedding(codebook_size, emb_dim)
-
-#     def forward(self, z):
-#         hard = self.straight_through if self.training else True
-
-#         logits = self.proj(z)
-
-#         soft_one_hot = F.gumbel_softmax(logits, tau=self.temperature, dim=1, hard=hard)
-
-#         z_q = torch.einsum("b n h w, n d -> b d h w", soft_one_hot, self.embed.weight)
-
-#         # + kl divergence to the prior loss
-#         qy = F.softmax(logits, dim=1)
-#         diff = self.kl_weight * torch.sum(qy * torch.log(qy * self.codebook_size + 1e-10), dim=1).mean()
-#         min_encoding_indices = soft_one_hot.argmax(dim=1)
-
-#         return z_q, diff, {"min_encoding_indices": min_encoding_indices}
-
-
 class Downsample(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -325,9 +297,6 @@ class VQAutoEncoder(nn.Module):
         codebook_size=1024,
         emb_dim=256,
         beta=0.25,
-        # gumbel_straight_through=False,
-        # gumbel_kl_weight=1e-8,
-        # model_path=None,
     ):
         super().__init__()
         self.in_channels = 3
@@ -348,18 +317,6 @@ class VQAutoEncoder(nn.Module):
             self.resolution,
             self.attn_resolutions,
         )
-        # print("VQAutoEncoder ------ quantizer_type: ", self.quantizer_type)
-
-        # if self.quantizer_type == "nearest":
-        #     self.beta = beta  # 0.25
-        #     self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
-        # elif self.quantizer_type == "gumbel":
-        #     self.gumbel_num_hiddens = emb_dim
-        #     self.straight_through = gumbel_straight_through
-        #     self.kl_weight = gumbel_kl_weight
-        #     self.quantize = GumbelQuantizer(
-        #         self.codebook_size, self.embed_dim, self.gumbel_num_hiddens, self.straight_through, self.kl_weight
-        #     )
         self.beta = beta  # 0.25
         self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
         self.generator = Generator(
@@ -458,33 +415,6 @@ class TransformerSALayer(nn.Module):
         return tgt
 
 
-# class Fuse_sft_block(nn.Module):
-#     def __init__(self, in_ch, out_ch):
-#         super().__init__()
-#         self.encode_enc = ResBlock(2 * in_ch, out_ch)
-
-#         self.scale = nn.Sequential(
-#             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-#             nn.LeakyReLU(0.2, True),
-#             nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
-#         )
-
-#         self.shift = nn.Sequential(
-#             nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1),
-#             nn.LeakyReLU(0.2, True),
-#             nn.Conv2d(out_ch, out_ch, kernel_size=3, padding=1),
-#         )
-
-#     def forward(self, enc_feat, dec_feat):
-#         enc_feat = self.encode_enc(torch.cat([enc_feat, dec_feat], dim=1))
-#         scale = self.scale(enc_feat)
-#         shift = self.shift(enc_feat)
-#         w = 0.5
-#         residual = w * (dec_feat * scale + shift)
-#         out = dec_feat + residual
-#         return out
-
-
 class CodeFormer(VQAutoEncoder):
     def __init__(
         self,
@@ -498,10 +428,6 @@ class CodeFormer(VQAutoEncoder):
     ):
         super(CodeFormer, self).__init__(512, 64, [1, 2, 2, 4, 4, 8], "nearest", 2, [16], codebook_size)
 
-        # if fix_modules is not None:
-        #     for module in fix_modules:
-        #         for param in getattr(self, module).parameters():
-        #             param.requires_grad = False
         for module in fix_modules:
             for param in getattr(self, module).parameters():
                 param.requires_grad = False
@@ -525,31 +451,6 @@ class CodeFormer(VQAutoEncoder):
         # logits_predict head
         self.idx_pred_layer = nn.Sequential(nn.LayerNorm(dim_embd), nn.Linear(dim_embd, codebook_size, bias=False))
 
-        # xxxx3333
-        # self.channels = {
-        #     "16": 512,
-        #     "32": 256,
-        #     "64": 256,
-        #     "128": 128,
-        #     "256": 128,
-        #     "512": 64,
-        # }
-
-        # after second residual block for > 16, before attn layer for ==16
-        # xxxx3333
-        # self.fuse_encoder_block = {"512": 2, "256": 5, "128": 8, "64": 11, "32": 14, "16": 18}
-        # after first residual block for > 16, before attn layer for ==16
-
-        # xxxx3333
-        # self.fuse_generator_block = {"16": 6, "32": 9, "64": 12, "128": 15, "256": 18, "512": 21}
-
-        # fuse_convs_dict
-        # xxxx3333
-        # self.fuse_convs_dict = nn.ModuleDict()
-        # for f_size in self.connect_list:
-        #     in_ch = self.channels[f_size]
-        #     self.fuse_convs_dict[f_size] = Fuse_sft_block(in_ch, in_ch)
-
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             module.weight.data.normal_(mean=0.0, std=0.02)
@@ -563,14 +464,8 @@ class CodeFormer(VQAutoEncoder):
         x = (x - 0.5) / 0.5  # normal
 
         # ################### Encoder #####################
-        # xxxx3333
-        # enc_feat_dict = {}
-        # out_list = [self.fuse_encoder_block[f_size] for f_size in self.connect_list]
         for i, block in enumerate(self.encoder.blocks):
             x = block(x)
-            # xxxx3333
-            # if i in out_list:
-            #     enc_feat_dict[str(x.shape[-1])] = x.clone()
 
         lq_feat = x
         # ################# Transformer ###################
@@ -598,16 +493,10 @@ class CodeFormer(VQAutoEncoder):
 
         # ################## Generator ####################
         x = quant_feat
-        # xxxx3333
-        # fuse_list = [self.fuse_generator_block[f_size] for f_size in self.connect_list]
 
         # len(self.generator.blocks) -- 25
         for i, block in enumerate(self.generator.blocks):
             x = block(x)
-            # xxxx3333
-            # if i in fuse_list:  # [9, 12, 15, 18], fuse after i-th block
-            #     f_size = str(x.shape[-1])
-            #     x = self.fuse_convs_dict[f_size](enc_feat_dict[f_size].detach(), x)  # w -- 0.5
         out = x
 
         # logits doesn't need softmax before cross_entropy loss

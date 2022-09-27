@@ -15,16 +15,16 @@ with open("README.md", "r") as file:
     long_description = file.read()
 
 setup(
-    name="image_face_beautify",
+    name="image_face",
     version="1.0.0",
     author="Dell Du",
     author_email="18588220928@163.com",
-    description="image/video face beautify package",
+    description="image/video face beautify/detect package",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/delldu/Real-ESRGAN.git",
-    packages=["image_face_beautify"],
-    package_data={"image_face_beautify": ["models/image_face_beautify.pth"]},
+    url="https://github.com/delldu/CodeFormer.git",
+    packages=["image_face"],
+    package_data={"image_face": ["models/image_face.pth"]},
     include_package_data=True,
     classifiers=[
         "Programming Language :: Python :: 3",

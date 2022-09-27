@@ -13,7 +13,8 @@ import os
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
-from torchvision.transforms.functional import normalize
+
+# from torchvision.transforms.functional import normalize
 import todos
 
 from . import rrdbnet, facedet, facegan
@@ -116,12 +117,11 @@ def get_affine_image(image, matrix, OH: int, OW: int):
 #     return eroded
 
 
-class BeautyModel(nn.Module):
-    """Beauty Model."""
+class FaceModel(nn.Module):
+    """Common Face Model."""
 
     def __init__(self):
-        super(BeautyModel, self).__init__()
-
+        super(FaceModel, self).__init__()
         # standard 5 landmarks for FFHQ faces with 512 x 512
         self.STANDARD_FACE_SIZE = 512
         self.STANDARD_FACE_LANDMARKS = [
@@ -131,10 +131,6 @@ class BeautyModel(nn.Module):
             [201.26117, 371.41043],
             [313.08905, 371.15118],
         ]
-
-        self.facedet = facedet.RetinaFace()
-        self.facegan = facegan.CodeFormer()
-        self.bgzoom2x = rrdbnet.RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
 
         kernel = (
             torch.Tensor(
@@ -156,6 +152,10 @@ class BeautyModel(nn.Module):
         face_mask = F.conv2d(face_mask, kernel, padding=2, groups=1)
         self.face_mask = nn.Parameter(data=face_mask, requires_grad=False)
 
+        self.facedet = facedet.RetinaFace()
+        self.facegan = facegan.CodeFormer()
+        self.bgzoom2x = rrdbnet.RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+        self.min_eyes_distance = 5.0
         # self.load_weights()
 
         # torch.save(self.state_dict(), "/tmp/image_face_beautify.pth")
@@ -181,6 +181,17 @@ class BeautyModel(nn.Module):
         self.bgzoom2x.load_state_dict(loadnet["params_ema"], strict=True)
 
     def forward(self, x):
+        pass
+        return x
+
+
+class BeautyModel(FaceModel):
+    """Beauty Model."""
+
+    def __init__(self):
+        super(BeautyModel, self).__init__()
+
+    def forward(self, x):
         B, C, H, W = x.size()
 
         # Pad x
@@ -197,7 +208,7 @@ class BeautyModel(nn.Module):
             landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
 
             eye_dist = torch.abs(landmark[0, 0] - landmark[1, 0]).item()
-            if eye_dist < 5.0:  # Skip strange face ...
+            if eye_dist < self.min_eyes_distance:  # Skip strange face ...
                 continue
 
             M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
@@ -213,3 +224,43 @@ class BeautyModel(nn.Module):
             bg = (1.0 - pasted_mask) * bg + pasted_mask * pasted_face
 
         return bg
+
+
+class DetectModel(FaceModel):
+    """Detect Model."""
+
+    def __init__(self):
+        super(DetectModel, self).__init__()
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+
+        # Pad x
+        pad_h = 1 if (H % 2 != 0) else 0
+        pad_w = 1 if (W % 2 != 0) else 0
+        if pad_h + pad_w > 0:
+            x = F.pad(x, (0, pad_w, 0, pad_h), "reflect")
+
+        bg = self.bgzoom2x(x)
+        B, C, H, W = bg.size()
+        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
+
+        faces = []
+        for i in range(face_locations.size(0)):
+            landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
+
+            eye_dist = torch.abs(landmark[0, 0] - landmark[1, 0]).item()
+            if eye_dist < self.min_eyes_distance:  # Skip strange face ...
+                continue
+
+            M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
+            cropped_face = get_affine_image(bg, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
+            refined_face = self.facegan(cropped_face)
+
+            faces.append(cropped_face)
+            faces.append(refined_face)
+
+        if len(faces) < 1:  # NOT Found Face !!!
+            return F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
+
+        return torch.cat(faces, dim=0)
