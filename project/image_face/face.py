@@ -184,6 +184,16 @@ class FaceModel(nn.Module):
         pass
         return x
 
+    def pad_input(self, x):
+        B, C, H, W = x.size()
+
+        # Pad x
+        pad_h = 1 if (H % 2 != 0) else 0
+        pad_w = 1 if (W % 2 != 0) else 0
+        if pad_h + pad_w > 0:
+            x = F.pad(x, (0, pad_w, 0, pad_h), "reflect")
+        return x
+
 
 class BeautyModel(FaceModel):
     """Beauty Model."""
@@ -192,13 +202,7 @@ class BeautyModel(FaceModel):
         super(BeautyModel, self).__init__()
 
     def forward(self, x):
-        B, C, H, W = x.size()
-
-        # Pad x
-        pad_h = 1 if (H % 2 != 0) else 0
-        pad_w = 1 if (W % 2 != 0) else 0
-        if pad_h + pad_w > 0:
-            x = F.pad(x, (0, pad_w, 0, pad_h), "reflect")
+        x = self.pad_input(x)
 
         bg = self.bgzoom2x(x)
         B, C, H, W = bg.size()
@@ -233,13 +237,7 @@ class DetectModel(FaceModel):
         super(DetectModel, self).__init__()
 
     def forward(self, x):
-        B, C, H, W = x.size()
-
-        # Pad x
-        pad_h = 1 if (H % 2 != 0) else 0
-        pad_w = 1 if (W % 2 != 0) else 0
-        if pad_h + pad_w > 0:
-            x = F.pad(x, (0, pad_w, 0, pad_h), "reflect")
+        x = self.pad_input(x)
 
         bg = self.bgzoom2x(x)
         B, C, H, W = bg.size()
@@ -263,4 +261,4 @@ class DetectModel(FaceModel):
         if len(faces) < 1:  # NOT Found Face !!!
             return F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
 
-        return torch.cat(faces, dim=0)
+        return torch.cat(faces, dim=0)  # BBx3x512x512

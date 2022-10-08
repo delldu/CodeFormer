@@ -41,8 +41,8 @@ def get_beauty_model():
     model = torch.jit.script(model)
 
     todos.data.mkdir("output")
-    if not os.path.exists("output/image_face.torch"):
-        model.save("output/image_face.torch")
+    if not os.path.exists("output/image_face_beauty.torch"):
+        model.save("output/image_face_beauty.torch")
 
     return model, device
 
@@ -53,10 +53,7 @@ def beauty_model_forward(model, device, input_tensor, multi_times=1):
     if H % multi_times != 0 or W % multi_times != 0:
         input_tensor = todos.data.zeropad_tensor(input_tensor, times=multi_times)
 
-    torch.cuda.synchronize()
-    with torch.jit.optimized_execution(False):
-        output_tensor = todos.model.forward(model, device, input_tensor)
-    torch.cuda.synchronize()
+    output_tensor = todos.model.forward(model, device, input_tensor)
 
     return output_tensor[:, :, 0 : 2 * H, 0 : 2 * W]
 
@@ -78,8 +75,8 @@ def get_detect_model():
     model = torch.jit.script(model)
 
     todos.data.mkdir("output")
-    if not os.path.exists("output/image_face.torch"):
-        model.save("output/image_face.torch")
+    if not os.path.exists("output/image_face_detect.torch"):
+        model.save("output/image_face_detect.torch")
 
     return model, device
 
@@ -90,10 +87,7 @@ def detect_model_forward(model, device, input_tensor, multi_times=1):
     if H % multi_times != 0 or W % multi_times != 0:
         input_tensor = todos.data.zeropad_tensor(input_tensor, times=multi_times)
 
-    torch.cuda.synchronize()
-    with torch.jit.optimized_execution(False):
-        output_tensor = todos.model.forward(model, device, input_tensor)
-    torch.cuda.synchronize()
+    output_tensor = todos.model.forward(model, device, input_tensor)  # BBx3x512x512
 
     return output_tensor
 
@@ -153,6 +147,7 @@ def beauty_predict(input_files, output_dir):
         zoom2x_tensor = todos.data.resize_tensor(input_tensor, 2 * H, 2 * W)
         todos.data.save_tensor([zoom2x_tensor, predict_tensor], output_file)
     todos.model.reset_device()
+
 
 def video_service(input_file, output_file, targ):
     # load video
@@ -227,7 +222,7 @@ def detect_predict(input_files, output_dir):
         input_tensor = todos.data.load_tensor(filename)
 
         # pytorch recommand clone.detach instead of torch.Tensor(input_tensor)
-        predict_tensor = detect_model_forward(model, device, input_tensor)
+        predict_tensor = detect_model_forward(model, device, input_tensor)  # BBx3x512x512
         output_file = f"{output_dir}/{os.path.basename(filename)}"
         if predict_tensor.size(0) < 2:
             todos.data.save_tensor([predict_tensor], output_file)
