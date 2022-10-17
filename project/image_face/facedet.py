@@ -77,45 +77,44 @@ def prior_box(H: int, W: int):
     return torch.tensor(anchors).view(-1, 4)  # torch.jit.script only support torch.tensor
 
 
-def nms(boxes, scores, thresh: float):
-    """NMS"""
-    keep = torchvision.ops.nms(
-        boxes=boxes,
-        scores=scores,  # 1D
-        iou_threshold=thresh,
-    )
-    return keep
-
-
-# def py_cpu_nms(dets, thresh):
-#     """Pure Python NMS baseline."""
-#     x1 = dets[:, 0]
-#     y1 = dets[:, 1]
-#     x2 = dets[:, 2]
-#     y2 = dets[:, 3]
-#     scores = dets[:, 4]
-
-#     areas = (x2 - x1 + 1) * (y2 - y1 + 1)
-#     order = scores.argsort()[::-1]
-
-#     keep = []
-#     while order.size > 0:
-#         i = order[0]
-#         keep.append(i)
-#         xx1 = np.maximum(x1[i], x1[order[1:]])
-#         yy1 = np.maximum(y1[i], y1[order[1:]])
-#         xx2 = np.minimum(x2[i], x2[order[1:]])
-#         yy2 = np.minimum(y2[i], y2[order[1:]])
-
-#         w = np.maximum(0.0, xx2 - xx1 + 1)
-#         h = np.maximum(0.0, yy2 - yy1 + 1)
-#         inter = w * h
-#         ovr = inter / (areas[i] + areas[order[1:]] - inter)
-
-#         inds = np.where(ovr <= thresh)[0]
-#         order = order[inds + 1]
-
+# def nms(boxes, scores, thresh: float):
+#     """NMS"""
+#     keep = torchvision.ops.nms(
+#         boxes=boxes,
+#         scores=scores,  # 1D
+#         iou_threshold=thresh,
+#     )
 #     return keep
+
+
+def nms(bboxes, scores, threshold: float = 0.5):
+    x1 = bboxes[:, 0]
+    y1 = bboxes[:, 1]
+    x2 = bboxes[:, 2]
+    y2 = bboxes[:, 3]
+    areas = (x2 - x1) * (y2 - y1)
+    _, order = scores.sort(0, descending=True)
+
+    keep: List[int] = []
+    while order.numel() > 0:
+        i = int(order[0].item())
+        keep.append(i)
+
+        if order.numel() == 1:
+            break
+
+        xx1 = x1[order[1:]].clamp(min=x1[i].item())  # [N-1,]
+        yy1 = y1[order[1:]].clamp(min=y1[i].item())
+        xx2 = x2[order[1:]].clamp(max=x2[i].item())
+        yy2 = y2[order[1:]].clamp(max=y2[i].item())
+        inter = (xx2 - xx1).clamp(min=0.0) * (yy2 - yy1).clamp(min=0.0)  # [N-1,]
+
+        iou = inter / (areas[i] + areas[order[1:]] - inter)  # [N-1,]
+        next_order_index = (iou <= threshold).nonzero().squeeze()
+        if next_order_index.numel() == 0:
+            break
+        order = order[next_order_index + 1]
+    return torch.tensor(keep)
 
 
 def conv_bn(inp, oup, stride=1, leaky: float = 0.0):
