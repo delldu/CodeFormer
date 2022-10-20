@@ -36,7 +36,7 @@ def decode_boxes(loc, priors, variances: List[float]):
             priors[:, :2] + loc[:, :2] * variances[0] * priors[:, 2:],
             priors[:, 2:] * torch.exp(loc[:, 2:] * variances[1]),
         ),
-        1,
+        dim=1,
     )
     boxes[:, :2] -= boxes[:, 2:] / 2
     boxes[:, 2:] += boxes[:, :2]
@@ -97,11 +97,13 @@ def nms(bboxes, scores, threshold: float = 0.5):
 
     keep: List[int] = []
     while order.numel() > 0:
-        i = int(order[0].item())
-        keep.append(i)
-
         if order.numel() == 1:
+            i = int(order.item())
+            keep.append(i)
             break
+        else:
+            i = int(order[0].item())
+            keep.append(i)
 
         xx1 = x1[order[1:]].clamp(min=x1[i].item())  # [N-1,]
         yy1 = y1[order[1:]].clamp(min=y1[i].item())
