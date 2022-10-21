@@ -15,7 +15,6 @@ from torch import nn as nn
 from torch.nn import functional as F
 
 # from torchvision.transforms.functional import normalize
-import todos
 
 from . import rrdbnet, facedet, facegan
 import pdb
@@ -180,30 +179,42 @@ class FaceModel(nn.Module):
         loadnet = torch.load("../weights/realesrgan/RealESRGAN_x2plus.pth", map_location=torch.device("cpu"))
         self.bgzoom2x.load_state_dict(loadnet["params_ema"], strict=True)
 
-    def forward(self, x):
-        pass
-        return x
+    def forward(self, x, m):
+        m = m.flatten()
+        m = int(m[0].item() + 0.5)
 
-    def pad_input(self, x):
-        B, C, H, W = x.size()
+        if m == 1:
+            return self.detect_forward(x)
 
-        # Pad x
-        pad_h = 1 if (H % 2 != 0) else 0
-        pad_w = 1 if (W % 2 != 0) else 0
-        if pad_h + pad_w > 0:
-            x = F.pad(x, (0, pad_w, 0, pad_h), "reflect")
-        return x
+        # method != 1
+        return self.beauty_forward(x)
 
+    def detect_forward(self, x):
+        bg = self.bgzoom2x(x)
+        B, C, H, W = bg.size()
+        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
 
-class BeautyModel(FaceModel):
-    """Beauty Model."""
+        faces = []
+        for i in range(face_locations.size(0)):
+            landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
 
-    def __init__(self):
-        super(BeautyModel, self).__init__()
+            eye_dist = torch.abs(landmark[0, 0] - landmark[1, 0]).item()
+            if eye_dist < self.min_eyes_distance:  # Skip strange face ...
+                continue
 
-    def forward(self, x):
-        x = self.pad_input(x)
+            M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
+            cropped_face = get_affine_image(bg, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
+            refined_face = self.facegan(cropped_face)
 
+            faces.append(cropped_face)
+            faces.append(refined_face)
+
+        if len(faces) < 1:  # NOT Found Face !!!
+            return F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
+
+        return torch.cat(faces, dim=0)  # BBx3x512x512
+
+    def beauty_forward(self, x):
         bg = self.bgzoom2x(x)
         B, C, H, W = bg.size()
         face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
@@ -228,37 +239,3 @@ class BeautyModel(FaceModel):
             bg = (1.0 - pasted_mask) * bg + pasted_mask * pasted_face
 
         return bg
-
-
-class DetectModel(FaceModel):
-    """Detect Model."""
-
-    def __init__(self):
-        super(DetectModel, self).__init__()
-
-    def forward(self, x):
-        x = self.pad_input(x)
-
-        bg = self.bgzoom2x(x)
-        B, C, H, W = bg.size()
-        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
-
-        faces = []
-        for i in range(face_locations.size(0)):
-            landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
-
-            eye_dist = torch.abs(landmark[0, 0] - landmark[1, 0]).item()
-            if eye_dist < self.min_eyes_distance:  # Skip strange face ...
-                continue
-
-            M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
-            cropped_face = get_affine_image(bg, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
-            refined_face = self.facegan(cropped_face)
-
-            faces.append(cropped_face)
-            faces.append(refined_face)
-
-        if len(faces) < 1:  # NOT Found Face !!!
-            return F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
-
-        return torch.cat(faces, dim=0)  # BBx3x512x512

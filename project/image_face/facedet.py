@@ -11,19 +11,14 @@
 #
 
 import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision
-from . import resnet
+# import torchvision
 
-# import torchvision.models as models
-# from torchvision.models._utils import IntermediateLayerGetter as IntermediateLayerGetter
-from typing import List, Dict
+from typing import List
 from . import resnet
 
 import math
-import numpy as np
 import pdb
 
 
@@ -115,8 +110,10 @@ def nms(bboxes, scores, threshold: float = 0.5):
         next_order_index = (iou <= threshold).nonzero().squeeze()
         if next_order_index.numel() == 0:
             break
-        order = order[next_order_index + 1]
-    return torch.tensor(keep)
+            
+        order = order[next_order_index + 1] # +1 update index
+
+    return torch.tensor(keep).to(torch.int64)
 
 
 def conv_bn(inp, oup, stride=1, leaky: float = 0.0):
@@ -195,7 +192,7 @@ class FPN(nn.Module):
         self.merge1 = conv_bn(out_channels, out_channels, leaky=leaky)
         self.merge2 = conv_bn(out_channels, out_channels, leaky=leaky)
 
-    def forward(self, input: List[Tensor]) -> List[Tensor]:
+    def forward(self, input: List[torch.Tensor]) -> List[torch.Tensor]:
         output1 = self.output1(input[0])
         output2 = self.output2(input[1])
         output3 = self.output3(input[2])
@@ -293,7 +290,7 @@ class RetinaFace(nn.Module):
         self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
         self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
 
-    def forward_x(self, bgr_image) -> List[Tensor]:
+    def forward_x(self, bgr_image) -> List[torch.Tensor]:
         # bgr_image.size() -- [1, 3, 640, 1013]
         # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
@@ -384,6 +381,7 @@ class RetinaFace(nn.Module):
         # do NMS
         nms_threshold = 0.4
         keep = nms(boxes, scores, nms_threshold)
+
         boxes, landmarks, scores = boxes[keep], landmarks[keep], scores[keep]
 
         return torch.cat((boxes, scores[:, None], landmarks), dim=1)  # [2, 15]
