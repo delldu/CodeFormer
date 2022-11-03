@@ -13,6 +13,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 # import torchvision
 
 from typing import List
@@ -110,8 +111,8 @@ def nms(bboxes, scores, threshold: float = 0.5):
         next_order_index = (iou <= threshold).nonzero().squeeze()
         if next_order_index.numel() == 0:
             break
-            
-        order = order[next_order_index + 1] # +1 update index
+
+        order = order[next_order_index + 1]  # +1 update index
 
     return torch.tensor(keep).to(torch.int64)
 

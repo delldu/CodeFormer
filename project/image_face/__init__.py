@@ -21,14 +21,14 @@ from . import face
 import pdb
 
 
-def get_model():
+def get_beauty_model():
     """Create beauty model."""
 
-    model_path = "models/image_face.pth"
+    model_path = "models/image_face.pth"  # Share same model between detection and beauty
     cdir = os.path.dirname(__file__)
     checkpoint = model_path if cdir == "" else cdir + "/" + model_path
 
-    model = face.FaceModel()
+    model = face.FaceBeautyModel()
     todos.model.load(model, checkpoint)
     device = todos.model.get_device()
     model = model.to(device)
@@ -38,8 +38,8 @@ def get_model():
     model = torch.jit.script(model)
 
     todos.data.mkdir("output")
-    if not os.path.exists("output/image_face.torch"):
-        model.save("output/image_face.torch")
+    if not os.path.exists("output/image_face_beauty.torch"):
+        model.save("output/image_face_beauty.torch")
 
     return model, device
 
@@ -49,7 +49,7 @@ def beauty_predict(input_files, output_dir):
     todos.data.mkdir(output_dir)
 
     # load model
-    model, device = get_model()
+    model, device = get_beauty_model()
 
     # load files
     image_filenames = todos.data.load_files(input_files)
@@ -63,16 +63,38 @@ def beauty_predict(input_files, output_dir):
         input_tensor = todos.data.load_tensor(filename)
 
         # pytorch recommand clone.detach instead of torch.Tensor(input_tensor)
-        action_tensor = torch.Tensor([2])
-        predict_tensor = todos.model.two_forward(model, device, input_tensor, action_tensor)
+        predict_tensor = todos.model.forward(model, device, input_tensor)
 
         output_file = f"{output_dir}/{os.path.basename(filename)}"
 
         B, C, H, W = input_tensor.size()
-        zoom2x_tensor = todos.data.resize_tensor(input_tensor, 2 * H, 2 * W)
+        output_tensor = todos.data.resize_tensor(input_tensor, H, W)
 
-        todos.data.save_tensor([zoom2x_tensor, predict_tensor], output_file)
+        todos.data.save_tensor([output_tensor, predict_tensor], output_file)
     todos.model.reset_device()
+
+
+def get_detect_model():
+    """Create beauty model."""
+
+    model_path = "models/image_face.pth"  # Share same model between detection and beauty
+    cdir = os.path.dirname(__file__)
+    checkpoint = model_path if cdir == "" else cdir + "/" + model_path
+
+    model = face.FaceDetectModel()
+    todos.model.load(model, checkpoint)
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+
+    print(f"Running on {device} ...")
+    model = torch.jit.script(model)
+
+    todos.data.mkdir("output")
+    if not os.path.exists("output/image_face_detect.torch"):
+        model.save("output/image_face_detect.torch")
+
+    return model, device
 
 
 def detect_predict(input_files, output_dir):
@@ -80,7 +102,7 @@ def detect_predict(input_files, output_dir):
     todos.data.mkdir(output_dir)
 
     # load model
-    model, device = get_model()
+    model, device = get_detect_model()
 
     # load files
     image_filenames = todos.data.load_files(input_files)
@@ -94,9 +116,7 @@ def detect_predict(input_files, output_dir):
         input_tensor = todos.data.load_tensor(filename)
 
         # pytorch recommand clone.detach instead of torch.Tensor(input_tensor)
-        # predict_tensor = todos.model.forward(model, device, input_tensor)  # BBx3x512x512
-        action_tensor = torch.Tensor([1])
-        predict_tensor = todos.model.two_forward(model, device, input_tensor, action_tensor)
+        predict_tensor = todos.model.forward(model, device, input_tensor)  # BBx3x512x512
 
         output_file = f"{output_dir}/{os.path.basename(filename)}"
         if predict_tensor.size(0) < 2:

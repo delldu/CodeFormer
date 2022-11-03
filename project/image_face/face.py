@@ -13,10 +13,7 @@ import os
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
-
-# from torchvision.transforms.functional import normalize
-
-from . import rrdbnet, facedet, facegan
+from . import facedet, facegan
 import pdb
 
 
@@ -77,7 +74,7 @@ def get_affine_matrix(landmarks, std_landmarks):
         [[float(M[0]), float(M[1]), float(M[2])], [float(-M[1]), float(M[0]), float(M[3])], [0.0, 0.0, 1.0]]
     ).to(landmarks.device)
 
-    # ==> matrix @ landmarks[i].view(3, 1）-- stdlandmaks
+    # ==> matrix @ landmarks[i].view(3, 1）-- stdard landmaks
 
     return matrix
 
@@ -153,46 +150,30 @@ class FaceModel(nn.Module):
 
         self.facedet = facedet.RetinaFace()
         self.facegan = facegan.CodeFormer()
-        self.bgzoom2x = rrdbnet.RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-        self.min_eyes_distance = 5.0
+        self.min_eyes_distance = 15.0
         # self.load_weights()
-
-        # torch.save(self.state_dict(), "/tmp/image_face_beautify.pth")
+        # torch.save(self.state_dict(), "/tmp/image_face.pth")
         # torch.jit.script(self.facedet) ==> OK
         # torch.jit.script(self.facegan) ==> OK
-        # torch.jit.script(self.bgzoom2x) ==> OK
 
     def load_weights(self):
-        # loadnet = torch.load("../weights/CodeFormer/codeformer.pth", map_location=torch.device("cpu"))
-        # self.facegan.load_state_dict(loadnet["params_ema"], strict=True)
-        load_facegan(self.facegan, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")
-
-        # from copy import deepcopy
-        # loadnet = torch.load("../weights/facelib/detection_Resnet50_Final.pth", map_location=torch.device("cpu"))
-        # for k, v in deepcopy(loadnet).items():
-        #     if k.startswith("module."):
-        #         loadnet[k[7:]] = v
-        #         loadnet.pop(k)
-        # self.facedet.load_state_dict(loadnet, strict=False) # ignal body.layer4
+        load_facegan(self.facegan, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")        
         load_facedet(self.facedet, "../weights/facelib/detection_Resnet50_Final.pth")
 
-        loadnet = torch.load("../weights/realesrgan/RealESRGAN_x2plus.pth", map_location=torch.device("cpu"))
-        self.bgzoom2x.load_state_dict(loadnet["params_ema"], strict=True)
+    def forward(self, x):
+        pass
+        return x
 
-    def forward(self, x, m):
-        m = m.flatten()
-        m = int(m[0].item() + 0.5)
 
-        if m == 1:
-            return self.detect_forward(x)
+class FaceDetectModel(FaceModel):
+    """Face Detection Model."""
 
-        # method != 1
-        return self.beauty_forward(x)
+    def __init__(self):
+        super(FaceDetectModel, self).__init__()
 
-    def detect_forward(self, x):
-        bg = self.bgzoom2x(x)
-        B, C, H, W = bg.size()
-        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
+    def forward(self, x):
+        B, C, H, W = x.size()
+        face_locations = self.facedet(x)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
 
         faces = []
         for i in range(face_locations.size(0)):
@@ -203,7 +184,7 @@ class FaceModel(nn.Module):
                 continue
 
             M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
-            cropped_face = get_affine_image(bg, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
+            cropped_face = get_affine_image(x, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
             refined_face = self.facegan(cropped_face)
 
             faces.append(cropped_face)
@@ -214,10 +195,16 @@ class FaceModel(nn.Module):
 
         return torch.cat(faces, dim=0)  # BBx3x512x512
 
-    def beauty_forward(self, x):
-        bg = self.bgzoom2x(x)
-        B, C, H, W = bg.size()
-        face_locations = self.facedet(bg)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
+
+class FaceBeautyModel(FaceModel):
+    """Face Beauty Model."""
+
+    def __init__(self):
+        super(FaceBeautyModel, self).__init__()
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+        face_locations = self.facedet(x)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
 
         for i in range(face_locations.size(0)):
             landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
@@ -227,15 +214,14 @@ class FaceModel(nn.Module):
                 continue
 
             M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
-            cropped_face = get_affine_image(bg, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
+            cropped_face = get_affine_image(x, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
             refined_face = self.facegan(cropped_face)
 
-            RM = torch.linalg.inv(
-                M
-            )  # get_affine_matrix(torch.Tensor(self.STANDARD_FACE_LANDMARKS).to(x.device), landmark)
+            RM = torch.linalg.inv(M)
+            # get_affine_matrix(torch.Tensor(self.STANDARD_FACE_LANDMARKS).to(x.device), landmark)
             pasted_face = get_affine_image(refined_face, RM, H, W)
             pasted_mask = get_affine_image(self.face_mask, RM, H, W)
 
-            bg = (1.0 - pasted_mask) * bg + pasted_mask * pasted_face
+            x = (1.0 - pasted_mask) * x + pasted_mask * pasted_face
 
-        return bg
+        return x
