@@ -170,6 +170,10 @@ class FaceDetectModel(FaceModel):
 
     def __init__(self):
         super(FaceDetectModel, self).__init__()
+        # Define max GPU/CPU memory -- 2G
+        self.MAX_H = 1024
+        self.MAX_W = 1024
+        self.MAX_TIMES = 4
 
     def forward(self, x):
         B, C, H, W = x.size()
@@ -201,6 +205,11 @@ class FaceBeautyModel(FaceModel):
 
     def __init__(self):
         super(FaceBeautyModel, self).__init__()
+        # Define max GPU/CPU memory -- 2G
+        self.MAX_H = 1024
+        self.MAX_W = 1024
+        self.MAX_TIMES = 4
+
 
     def forward(self, x):
         B, C, H, W = x.size()

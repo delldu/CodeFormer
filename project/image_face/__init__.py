@@ -20,6 +20,24 @@ from . import face
 
 import pdb
 
+def get_tvm_model():
+    """Create beauty model."""
+
+    model_path = "models/image_face.pth"  # Share same model between detection and beauty
+    cdir = os.path.dirname(__file__)
+    checkpoint = model_path if cdir == "" else cdir + "/" + model_path
+
+    model = face.FaceBeautyModel()
+    todos.model.load(model, checkpoint)
+
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+
+    print(f"Running on {device} ...")
+
+    return model, device
+
 
 def get_beauty_model():
     """Create beauty model."""
@@ -30,6 +48,8 @@ def get_beauty_model():
 
     model = face.FaceBeautyModel()
     todos.model.load(model, checkpoint)
+    model = todos.model.ResizePadModel(model)
+
     device = todos.model.get_device()
     model = model.to(device)
     model.eval()
