@@ -20,6 +20,7 @@ from . import face
 
 import pdb
 
+
 def get_tvm_model():
     """Create beauty model."""
 

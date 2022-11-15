@@ -14,6 +14,7 @@ import os
 import time
 import random
 import torch
+import todos
 
 import image_face
 
@@ -30,15 +31,13 @@ if __name__ == "__main__":
     for count in range(N):
         progress_bar.update(1)
 
-        h = random.randint(0, 32)
-        w = random.randint(0, 32)
+        h = random.randint(-32, 32)
+        w = random.randint(-32, 32)
         x = torch.randn(B, C, H + h, W + w)
         # print("x: ", x.size())
 
         start_time = time.time()
-        with torch.no_grad():
-            y = model(x.to(device))
-        torch.cuda.synchronize()
+        y = todos.model.forward(model, device, x)
         mean_time += time.time() - start_time
 
     mean_time /= N

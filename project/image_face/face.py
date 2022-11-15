@@ -157,7 +157,7 @@ class FaceModel(nn.Module):
         # torch.jit.script(self.facegan) ==> OK
 
     def load_weights(self):
-        load_facegan(self.facegan, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")        
+        load_facegan(self.facegan, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")
         load_facedet(self.facedet, "../weights/facelib/detection_Resnet50_Final.pth")
 
     def forward(self, x):
@@ -205,11 +205,10 @@ class FaceBeautyModel(FaceModel):
 
     def __init__(self):
         super(FaceBeautyModel, self).__init__()
-        # Define max GPU/CPU memory -- 2G
+        # Define max GPU/CPU memory -- 3G, 80ms
         self.MAX_H = 1024
-        self.MAX_W = 1024
+        self.MAX_W = 2048
         self.MAX_TIMES = 4
-
 
     def forward(self, x):
         B, C, H, W = x.size()
