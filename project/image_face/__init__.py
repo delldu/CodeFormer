@@ -69,15 +69,13 @@ def face_predict(input_files, output_dir):
             predict_tensor, detected_tensor = model(input_tensor.to(device))
 
 
-        # output_file = f"{output_dir}/{os.path.basename(filename)}"
-        # # B, C, H, W = input_tensor.size()
-        # # output_tensor = todos.data.resize_tensor(input_tensor, H, W)
-        # todos.data.save_tensor([output_tensor, predict_tensor], output_file)
+        output_file = f"{output_dir}/{os.path.basename(filename)}"
+        todos.data.save_tensor([output_tensor, predict_tensor], output_file)
 
         # save detected faces
         output_file = f"{output_dir}/d_{os.path.basename(filename)}"
         if detected_tensor.size(0) < 2:
-            pass # todos.data.save_tensor([detected_tensor], output_file)
+            todos.data.save_tensor([detected_tensor], output_file)
         else:
             n_row = math.ceil(math.sqrt(detected_tensor.size(0)))
             if n_row % 2 != 0:
