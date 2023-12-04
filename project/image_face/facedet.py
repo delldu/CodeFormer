@@ -3,13 +3,13 @@
 #
 # /************************************************************************************
 # ***
-# ***    Copyright 2022 Dell(18588220928@163.com), All Rights Reserved.
+# ***    Copyright 2022-2024 Dell(18588220928@163.com), All Rights Reserved.
 # ***
 # ***    File Author: Dell, 2022年 09月 13日 星期二 00:22:40 CST
 # ***
 # ************************************************************************************/
 #
-
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,6 +22,23 @@ from . import resnet
 import math
 import pdb
 
+def load_facedet(model, path, subkey=None):
+    """Load model."""
+    if not os.path.exists(path):
+        raise IOError(f"Model checkpoint '{path}' doesn't exist.")
+
+    # state_dict = torch.load(path, map_location=lambda storage, loc: storage)
+    state_dict = torch.load(path, map_location=torch.device("cpu"))
+    if subkey is not None:
+        state_dict = state_dict[subkey]
+
+    target_state_dict = model.state_dict()
+    for n, p in state_dict.items():
+        n1 = n.replace("module.", "")
+        if n1 in target_state_dict.keys():
+            target_state_dict[n1].copy_(p)
+        else:
+            raise KeyError(n)
 
 # Adapted from https://github.com/Hakuyume/chainer-ssd
 def decode_boxes(loc, priors, variances: List[float]):
@@ -132,7 +149,7 @@ def conv_bn_no_relu(inp, oup, stride):
     )
 
 
-def conv_bn1X1(inp, oup, stride, leaky: float = 0.0):
+def conv_bn1x1(inp, oup, stride, leaky: float = 0.0):
     return nn.Sequential(
         nn.Conv2d(inp, oup, 1, stride, padding=0, bias=False),
         nn.BatchNorm2d(oup),
@@ -140,20 +157,9 @@ def conv_bn1X1(inp, oup, stride, leaky: float = 0.0):
     )
 
 
-# def conv_dw(inp, oup, stride, leaky:float=0.1):
-#     return nn.Sequential(
-#         nn.Conv2d(inp, inp, 3, stride, 1, groups=inp, bias=False),
-#         nn.BatchNorm2d(inp),
-#         nn.LeakyReLU(negative_slope=leaky, inplace=True),
-#         nn.Conv2d(inp, oup, 1, 1, 0, bias=False),
-#         nn.BatchNorm2d(oup),
-#         nn.LeakyReLU(negative_slope=leaky, inplace=True),
-#     )
-
-
 class SSH(nn.Module):
     def __init__(self, in_channel, out_channel):
-        super(SSH, self).__init__()
+        super().__init__()
         assert out_channel % 4 == 0
         leaky = 0.0
         if out_channel <= 64:
@@ -182,13 +188,14 @@ class SSH(nn.Module):
 
 class FPN(nn.Module):
     def __init__(self, in_channels_list, out_channels):
-        super(FPN, self).__init__()
+        super().__init__()
+        # FPN:  [512, 1024, 2048] 256
         leaky = 0.0
-        if out_channels <= 64:
-            leaky = 0.1
-        self.output1 = conv_bn1X1(in_channels_list[0], out_channels, stride=1, leaky=leaky)
-        self.output2 = conv_bn1X1(in_channels_list[1], out_channels, stride=1, leaky=leaky)
-        self.output3 = conv_bn1X1(in_channels_list[2], out_channels, stride=1, leaky=leaky)
+        # if out_channels <= 64: # False
+        #     leaky = 0.1
+        self.output1 = conv_bn1x1(in_channels_list[0], out_channels, stride=1, leaky=leaky)
+        self.output2 = conv_bn1x1(in_channels_list[1], out_channels, stride=1, leaky=leaky)
+        self.output3 = conv_bn1x1(in_channels_list[2], out_channels, stride=1, leaky=leaky)
 
         self.merge1 = conv_bn(out_channels, out_channels, leaky=leaky)
         self.merge2 = conv_bn(out_channels, out_channels, leaky=leaky)
@@ -211,8 +218,8 @@ class FPN(nn.Module):
 
 
 class ClassHead(nn.Module):
-    def __init__(self, inchannels=512, num_anchors=3):
-        super(ClassHead, self).__init__()
+    def __init__(self, inchannels=256, num_anchors=3):
+        super().__init__()
         self.num_anchors = num_anchors
         self.conv1x1 = nn.Conv2d(inchannels, self.num_anchors * 2, kernel_size=(1, 1), stride=1, padding=0)
 
@@ -224,8 +231,8 @@ class ClassHead(nn.Module):
 
 
 class BboxHead(nn.Module):
-    def __init__(self, inchannels=512, num_anchors=3):
-        super(BboxHead, self).__init__()
+    def __init__(self, inchannels=256, num_anchors=3):
+        super().__init__()
         self.conv1x1 = nn.Conv2d(inchannels, num_anchors * 4, kernel_size=(1, 1), stride=1, padding=0)
 
     def forward(self, x):
@@ -236,8 +243,8 @@ class BboxHead(nn.Module):
 
 
 class LandmarkHead(nn.Module):
-    def __init__(self, inchannels=512, num_anchors=3):
-        super(LandmarkHead, self).__init__()
+    def __init__(self, inchannels=256, num_anchors=3):
+        super().__init__()
         self.conv1x1 = nn.Conv2d(inchannels, num_anchors * 10, kernel_size=(1, 1), stride=1, padding=0)
 
     def forward(self, x):
@@ -247,21 +254,21 @@ class LandmarkHead(nn.Module):
         return out.view(out.shape[0], -1, 10)
 
 
-def make_class_head(fpn_num=3, inchannels=64, anchor_num=2):
+def make_class_head(fpn_num=3, inchannels=256, anchor_num=2):
     classhead = nn.ModuleList()
     for i in range(fpn_num):
         classhead.append(ClassHead(inchannels, anchor_num))
     return classhead
 
 
-def make_bbox_head(fpn_num=3, inchannels=64, anchor_num=2):
+def make_bbox_head(fpn_num=3, inchannels=256, anchor_num=2):
     bboxhead = nn.ModuleList()
     for i in range(fpn_num):
         bboxhead.append(BboxHead(inchannels, anchor_num))
     return bboxhead
 
 
-def make_landmark_head(fpn_num=3, inchannels=64, anchor_num=2):
+def make_landmark_head(fpn_num=3, inchannels=256, anchor_num=2):
     landmarkhead = nn.ModuleList()
     for i in range(fpn_num):
         landmarkhead.append(LandmarkHead(inchannels, anchor_num))
@@ -269,9 +276,8 @@ def make_landmark_head(fpn_num=3, inchannels=64, anchor_num=2):
 
 
 class RetinaFace(nn.Module):
-    def __init__(self, phase="test"):
-        super(RetinaFace, self).__init__()
-        self.phase = phase
+    def __init__(self):
+        super().__init__()
         self.body = resnet.resnet50_3layers()
 
         in_channels_stage2 = 256
@@ -291,12 +297,17 @@ class RetinaFace(nn.Module):
         self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
         self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
 
+        load_facedet(self, "../weights/facelib/detection_Resnet50_Final.pth")
+
+        self.register_buffer("mean_tensor", torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1))
+        self.half()
+
+
     def forward_x(self, bgr_image) -> List[torch.Tensor]:
         # bgr_image.size() -- [1, 3, 640, 1013]
         # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
         out = self.body(bgr_image)
-        # len(out) -- 3
 
         # FPN
         fpn = self.fpn(out)
@@ -325,31 +336,32 @@ class RetinaFace(nn.Module):
         for i, head in enumerate(self.LandmarkHead):
             outs.append(head(features[i]))
         ldm_regressions = torch.cat(outs, dim=1)
-
         # bbox_regressions.shape -- [1, 26720, 4]
         # classifications.shape -- [1, 26720, 2]
         # ldm_regressions.shape -- [1, 26720, 10]
 
-        if self.phase == "train":
-            output = (bbox_regressions, classifications, ldm_regressions)
-        else:
-            output = (bbox_regressions, F.softmax(classifications, dim=-1), ldm_regressions)
-
+        output = (bbox_regressions, F.softmax(classifications, dim=2), ldm_regressions)
         # (Pdb) output[0].size() -- [1, 26720, 4]
         # (Pdb) output[1].size() -- [1, 26720, 2]
         # (Pdb) output[2].size() -- [1, 26720, 10]
 
         return output
 
+    def on_cuda(self):
+        return self.mean_tensor.is_cuda
+
     def forward(self, x):
+        if self.on_cuda():
+            x = x.half()
+
         bgr_image = x[:, [2, 1, 0], :, :]  # change channel from RGB to BGR
 
         B, C, H, W = bgr_image.shape
-        mean_tensor = torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1).to(bgr_image.device)
+        # mean_tensor = torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1).to(bgr_image.device)
         # mean_tensor = torch.tensor([104., 117., 123.])
         # 0.485, 0.456, 0.406 -- RGB ==> 104(B), 117(G), 123(R) == BGR
 
-        bgr_image = bgr_image - mean_tensor
+        bgr_image = bgr_image - self.mean_tensor
         bgr_image = bgr_image * 255.0
         # ==> bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
@@ -385,4 +397,4 @@ class RetinaFace(nn.Module):
 
         boxes, landmarks, scores = boxes[keep], landmarks[keep], scores[keep]
 
-        return torch.cat((boxes, scores[:, None], landmarks), dim=1)  # [2, 15]
+        return torch.cat((boxes, scores[:, None], landmarks), dim=1).float()  # [2, 15]

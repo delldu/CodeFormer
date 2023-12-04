@@ -33,11 +33,11 @@ setup(
     ],
     install_requires=[
         "torch >= 1.9.0",
-        "torchvision >= 0.10.0",
+        # "torchvision >= 0.10.0",
         "Pillow >= 7.2.0",
-        "numpy >= 1.19.5",
-        "einops >= 0.3.0",
-        "redos >= 1.0.0",
+        # "numpy >= 1.19.5",
+        # "einops >= 0.3.0",
+        # "redos >= 1.0.0",
         "todos >= 1.0.0",
     ],
 )

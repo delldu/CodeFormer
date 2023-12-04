@@ -3,13 +3,13 @@
 #
 # /************************************************************************************
 # ***
-# ***    Copyright 2022 Dell(18588220928@163.com), All Rights Reserved.
+# ***    Copyright 2022-2024 Dell(18588220928@163.com), All Rights Reserved.
 # ***
 # ***    File Author: Dell, 2022年 09月 13日 星期二 00:22:40 CST
 # ***
 # ************************************************************************************/
 #
-
+import os
 import math
 import torch
 from torch import nn, Tensor
@@ -18,6 +18,25 @@ from typing import Optional, List
 
 import pdb
 
+def load_facegan(model, path, subkey=None):
+    """Load model."""
+    if not os.path.exists(path):
+        raise IOError(f"Model checkpoint '{path}' doesn't exist.")
+
+    # state_dict = torch.load(path, map_location=lambda storage, loc: storage)
+    state_dict = torch.load(path, map_location=torch.device("cpu"))
+    if subkey is not None:
+        state_dict = state_dict[subkey]
+
+    target_state_dict = model.state_dict()
+    for n, p in state_dict.items():
+        if n.startswith("fuse_convs_dict."):
+            continue
+
+        if n in target_state_dict.keys():
+            target_state_dict[n].copy_(p)
+        else:
+            raise KeyError(n)
 
 def normalize(in_channels):
     return torch.nn.GroupNorm(num_groups=32, num_channels=in_channels, eps=1e-6, affine=True)
@@ -30,7 +49,7 @@ def swish(x):
 #  Define VQVAE classes
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, emb_dim, beta):
-        super(VectorQuantizer, self).__init__()
+        super().__init__()
         self.codebook_size = codebook_size  # number of embeddings
         self.emb_dim = emb_dim  # dimension of embedding
         self.beta = beta  # commitment cost used in loss term, beta * ||z_e(x)-sg[e]||^2
@@ -91,7 +110,8 @@ class VectorQuantizer(nn.Module):
         min_encodings = torch.zeros(indices.shape[0], self.codebook_size).to(indices)
         min_encodings.scatter_(1, indices, 1)
         # get quantized latent vectors
-        z_q = torch.matmul(min_encodings.float(), self.embedding.weight)
+        # z_q = torch.matmul(min_encodings.float(), self.embedding.weight)
+        z_q = torch.matmul(min_encodings.to(self.embedding.weight.dtype), self.embedding.weight)
 
         if shape is not None:  # reshape back to match original input shape
             z_q = z_q.view(shape).permute(0, 3, 1, 2).contiguous()
@@ -125,7 +145,7 @@ class Upsample(nn.Module):
 
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels=None):
-        super(ResBlock, self).__init__()
+        super().__init__()
         self.in_channels = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
         self.norm1 = normalize(in_channels)
@@ -286,8 +306,8 @@ class Generator(nn.Module):
 
 
 class VQAutoEncoder(nn.Module):
-    def __init__(
-        self,
+    # 512, 64, [1, 2, 2, 4, 4, 8], "nearest", 2, [16], codebook_size
+    def __init__(self,
         img_size,
         nf,
         ch_mult,
@@ -416,23 +436,22 @@ class TransformerSALayer(nn.Module):
 
 
 class CodeFormer(VQAutoEncoder):
-    def __init__(
-        self,
+    def __init__(self,
         dim_embd=512,
         n_head=8,
         n_layers=9,
         codebook_size=1024,
         latent_size=256,
-        connect_list=["32", "64", "128", "256"],
+        # connect_list=["32", "64", "128", "256"],
         fix_modules=["quantize", "generator"],
     ):
-        super(CodeFormer, self).__init__(512, 64, [1, 2, 2, 4, 4, 8], "nearest", 2, [16], codebook_size)
+        super().__init__(512, 64, [1, 2, 2, 4, 4, 8], "nearest", 2, [16], codebook_size)
 
         for module in fix_modules:
             for param in getattr(self, module).parameters():
                 param.requires_grad = False
 
-        self.connect_list = connect_list
+        # self.connect_list = connect_list
         self.n_layers = n_layers
         self.dim_embd = dim_embd
         self.dim_mlp = dim_embd * 2
@@ -451,31 +470,32 @@ class CodeFormer(VQAutoEncoder):
         # logits_predict head
         self.idx_pred_layer = nn.Sequential(nn.LayerNorm(dim_embd), nn.Linear(dim_embd, codebook_size, bias=False))
 
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
+        load_facegan(self, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")
+        self.half()
+
+    def on_cuda(self):
+        return self.position_emb.is_cuda
 
     def forward(self, x):
+        if self.on_cuda():
+            x = x.half()
+
         x = (x - 0.5) / 0.5  # normal
 
         # ################### Encoder #####################
-        for i, block in enumerate(self.encoder.blocks):
-            x = block(x)
+        x = self.encoder(x)
+        # for i, block in enumerate(self.encoder.blocks):
+        #     x = block(x)
 
         lq_feat = x
         # ################# Transformer ###################
         pos_emb = self.position_emb.unsqueeze(1).repeat(1, x.shape[0], 1)
         # BCHW -> BC(HW) -> (HW)BC
-        feat_emb = self.feat_emb(lq_feat.flatten(2).permute(2, 0, 1))
-        query_emb = feat_emb
+        query_emb = self.feat_emb(lq_feat.flatten(2).permute(2, 0, 1))
+        # query_emb = feat_emb
 
         # Transformer encoder
-        for layer in self.ft_layers:
+        for layer in self.ft_layers: # 9 layers ?
             query_emb = layer(query_emb, query_pos=pos_emb)
 
         # output logits
@@ -489,10 +509,10 @@ class CodeFormer(VQAutoEncoder):
         # if detach_16:  # True
         #     quant_feat = quant_feat.detach()  # for training stage III
 
-        quant_feat = adaptive_instance_normalization(quant_feat, lq_feat)
+        x = adaptive_instance_normalization(quant_feat, lq_feat)
 
         # ################## Generator ####################
-        x = quant_feat
+        # x = quant_feat
 
         # len(self.generator.blocks) -- 25
         for i, block in enumerate(self.generator.blocks):
@@ -502,4 +522,4 @@ class CodeFormer(VQAutoEncoder):
         # logits doesn't need softmax before cross_entropy loss
         out = (out + 1.0) / 2.0  # change from [-1.0, 1.0] to [0.0, 1.0]
 
-        return out.clamp(0.0, 1.0)
+        return out.clamp(0.0, 1.0).float()

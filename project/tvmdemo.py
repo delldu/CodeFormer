@@ -22,7 +22,7 @@ import image_face
 
 
 def compile():
-    model, device = image_face.get_tvm_model()
+    model, device = image_face.get_face_model()
     SO_B, SO_C, SO_H, SO_W = 1, 3, model.MAX_H, model.MAX_W
 
     todos.data.mkdir("output")

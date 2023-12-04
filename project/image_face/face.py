@@ -3,58 +3,20 @@
 #
 # /************************************************************************************
 # ***
-# ***    Copyright 2022 Dell(18588220928@163.com), All Rights Reserved.
+# ***    Copyright 2022-2024 Dell(18588220928@163.com), All Rights Reserved.
 # ***
 # ***    File Author: Dell, 2022年 09月 13日 星期二 00:22:40 CST
 # ***
 # ************************************************************************************/
 #
-import os
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
 from . import facedet, facegan
+
+from typing import List
+
 import pdb
-
-
-def load_facegan(model, path, subkey=None):
-    """Load model."""
-    if not os.path.exists(path):
-        raise IOError(f"Model checkpoint '{path}' doesn't exist.")
-
-    # state_dict = torch.load(path, map_location=lambda storage, loc: storage)
-    state_dict = torch.load(path, map_location=torch.device("cpu"))
-    if subkey is not None:
-        state_dict = state_dict[subkey]
-
-    target_state_dict = model.state_dict()
-    for n, p in state_dict.items():
-        if n.startswith("fuse_convs_dict."):
-            continue
-
-        if n in target_state_dict.keys():
-            target_state_dict[n].copy_(p)
-        else:
-            raise KeyError(n)
-
-
-def load_facedet(model, path, subkey=None):
-    """Load model."""
-    if not os.path.exists(path):
-        raise IOError(f"Model checkpoint '{path}' doesn't exist.")
-
-    # state_dict = torch.load(path, map_location=lambda storage, loc: storage)
-    state_dict = torch.load(path, map_location=torch.device("cpu"))
-    if subkey is not None:
-        state_dict = state_dict[subkey]
-
-    target_state_dict = model.state_dict()
-    for n, p in state_dict.items():
-        n1 = n.replace("module.", "")
-        if n1 in target_state_dict.keys():
-            target_state_dict[n1].copy_(p)
-        else:
-            raise KeyError(n)
 
 
 def get_affine_matrix(landmarks, std_landmarks):
@@ -117,10 +79,15 @@ class FaceModel(nn.Module):
     """Common Face Model."""
 
     def __init__(self):
-        super(FaceModel, self).__init__()
+        super().__init__()
+        self.MAX_H = 2024
+        self.MAX_W = 2024
+        self.MAX_TIMES = 1
+        # GPU -- 2G, 75ms
+
         # standard 5 landmarks for FFHQ faces with 512 x 512
         self.STANDARD_FACE_SIZE = 512
-        self.STANDARD_FACE_LANDMARKS = [
+        STANDARD_FACE_LANDMARKS = [
             [192.98138, 239.94708],
             [318.90277, 240.1936],
             [256.63416, 314.01935],
@@ -138,44 +105,25 @@ class FaceModel(nn.Module):
                     [0.00078633, 0.00655965, 0.01330373, 0.00655965, 0.00078633],
                 ]
             )
-            .unsqueeze(0)
-            .unsqueeze(0)
         )
         pad = 5
         face_mask = torch.ones((1, 1, self.STANDARD_FACE_SIZE - 4 * pad, self.STANDARD_FACE_SIZE - 4 * pad))
         face_mask = F.pad(face_mask, [pad, pad, pad, pad], mode="constant", value=0.5)
         face_mask = F.pad(face_mask, [pad, pad, pad, pad], mode="constant", value=0.0)
-        face_mask = F.conv2d(face_mask, kernel, padding=2, groups=1)
-        self.face_mask = nn.Parameter(data=face_mask, requires_grad=False)
+        face_mask = F.conv2d(face_mask, kernel.unsqueeze(0).unsqueeze(0), padding=2, groups=1)
+        # self.face_mask = nn.Parameter(data=face_mask, requires_grad=False)
+        self.register_buffer("face_mask", face_mask)
+        self.register_buffer("STANDARD_FACE_LANDMARKS", torch.tensor(STANDARD_FACE_LANDMARKS))
+        self.min_eyes_distance = 15.0
 
         self.facedet = facedet.RetinaFace()
         self.facegan = facegan.CodeFormer()
-        self.min_eyes_distance = 15.0
-        # self.load_weights()
         # torch.save(self.state_dict(), "/tmp/image_face.pth")
         # torch.jit.script(self.facedet) ==> OK
         # torch.jit.script(self.facegan) ==> OK
 
-    def load_weights(self):
-        load_facegan(self.facegan, "../weights/CodeFormer/codeformer.pth", subkey="params_ema")
-        load_facedet(self.facedet, "../weights/facelib/detection_Resnet50_Final.pth")
 
-    def forward(self, x):
-        pass
-        return x
-
-
-class FaceDetectModel(FaceModel):
-    """Face Detection Model."""
-
-    def __init__(self):
-        super(FaceDetectModel, self).__init__()
-        # Define max GPU/CPU memory -- 2G
-        self.MAX_H = 1024
-        self.MAX_W = 1024
-        self.MAX_TIMES = 4
-
-    def forward(self, x):
+    def forward(self, x) -> List[torch.Tensor]:
         B, C, H, W = x.size()
         face_locations = self.facedet(x)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
 
@@ -187,49 +135,24 @@ class FaceDetectModel(FaceModel):
             if eye_dist < self.min_eyes_distance:  # Skip strange face ...
                 continue
 
-            M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
+            M = get_affine_matrix(landmark, self.STANDARD_FACE_LANDMARKS)
             cropped_face = get_affine_image(x, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
             refined_face = self.facegan(cropped_face)
 
+            # save detected face
             faces.append(cropped_face)
             faces.append(refined_face)
 
-        if len(faces) < 1:  # NOT Found Face !!!
-            return F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
-
-        return torch.cat(faces, dim=0)  # BBx3x512x512
-
-
-class FaceBeautyModel(FaceModel):
-    """Face Beauty Model."""
-
-    def __init__(self):
-        super(FaceBeautyModel, self).__init__()
-        # Define max GPU/CPU memory -- 3G, 80ms
-        self.MAX_H = 1024
-        self.MAX_W = 2048
-        self.MAX_TIMES = 4
-
-    def forward(self, x):
-        B, C, H, W = x.size()
-        face_locations = self.facedet(x)  # bbox(4)-score(1)-landm(10), size() -- [2, 15]
-
-        for i in range(face_locations.size(0)):
-            landmark = face_locations[i, 5:].view(-1, 2)  # skip bbox, score
-
-            eye_dist = torch.abs(landmark[0, 0] - landmark[1, 0]).item()
-            if eye_dist < self.min_eyes_distance:  # Skip strange face ...
-                continue
-
-            M = get_affine_matrix(landmark, torch.tensor(self.STANDARD_FACE_LANDMARKS).to(x.device))
-            cropped_face = get_affine_image(x, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
-            refined_face = self.facegan(cropped_face)
-
             RM = torch.linalg.inv(M)
-            # get_affine_matrix(torch.Tensor(self.STANDARD_FACE_LANDMARKS).to(x.device), landmark)
+            # get_affine_matrix(self.STANDARD_FACE_LANDMARKS), landmark)
             pasted_face = get_affine_image(refined_face, RM, H, W)
             pasted_mask = get_affine_image(self.face_mask, RM, H, W)
 
             x = (1.0 - pasted_mask) * x + pasted_mask * pasted_face
 
-        return x
+        if len(faces) < 1:  # NOT Found Face !!!
+            detected_faces = F.interpolate(x, size=[self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE])
+        else:
+            detected_faces = torch.cat(faces, dim=0)  # BBx3x512x512
+
+        return x, detected_faces
