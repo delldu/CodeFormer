@@ -17,9 +17,57 @@ from tqdm import tqdm
 import torch
 import todos
 from . import face
+from . import facegan
+from . import facedet
 
 import pdb
 
+
+def get_facedet_model():
+    model = facedet.RetinaFace()
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+    if 'cpu' in str(device.type):
+        model.float()
+
+    print(f"Running on {device} ...")
+
+    # make sure model good for C/C++
+    model = torch.jit.script(model)
+    # https://github.com/pytorch/pytorch/issues/52286
+    torch._C._jit_set_profiling_executor(False)
+    # C++ Reference
+    # torch::jit::getProfilingMode() = false;                                                                                                             
+    # torch::jit::setTensorExprFuserEnabled(false);
+    todos.data.mkdir("output")
+    if not os.path.exists("output/image_facedet.torch"):
+        model.save("output/image_facedet.torch")
+
+    return model, device
+
+def get_facegan_model():
+    model = facegan.CodeFormer()
+    device = todos.model.get_device()
+    model = model.to(device)
+    model.eval()
+    if 'cpu' in str(device.type):
+        model.float()
+
+    print(f"Running on {device} ...")
+
+    # make sure model good for C/C++
+    model = torch.jit.script(model)
+    # https://github.com/pytorch/pytorch/issues/52286
+    torch._C._jit_set_profiling_executor(False)
+    # C++ Reference
+    # torch::jit::getProfilingMode() = false;                                                                                                             
+    # torch::jit::setTensorExprFuserEnabled(false);
+    todos.data.mkdir("output")
+    if not os.path.exists("output/image_facegan.torch"):
+        model.save("output/image_facegan.torch")
+
+    return model, device
 
 def get_face_model():
     """Create model."""
@@ -66,11 +114,11 @@ def face_predict(input_files, output_dir):
         input_tensor = todos.data.load_tensor(filename)
 
         with torch.no_grad():
-            predict_tensor, detected_tensor = model(input_tensor.to(device))
+            output_tensor, detected_tensor = model(input_tensor.to(device))
 
 
         output_file = f"{output_dir}/{os.path.basename(filename)}"
-        todos.data.save_tensor([output_tensor, predict_tensor], output_file)
+        todos.data.save_tensor([input_tensor, output_tensor], output_file)
 
         # save detected faces
         output_file = f"{output_dir}/d_{os.path.basename(filename)}"

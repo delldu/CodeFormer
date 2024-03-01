@@ -22,16 +22,15 @@ from . import resnet
 import math
 import pdb
 
-def load_facedet(model, path, subkey=None):
+def load_facedet(model, path):
     """Load model."""
+    cdir = os.path.dirname(__file__)
+    path = path if cdir == "" else cdir + "/" + path
+
     if not os.path.exists(path):
         raise IOError(f"Model checkpoint '{path}' doesn't exist.")
 
-    # state_dict = torch.load(path, map_location=lambda storage, loc: storage)
     state_dict = torch.load(path, map_location=torch.device("cpu"))
-    if subkey is not None:
-        state_dict = state_dict[subkey]
-
     target_state_dict = model.state_dict()
     for n, p in state_dict.items():
         n1 = n.replace("module.", "")
@@ -41,13 +40,13 @@ def load_facedet(model, path, subkey=None):
             raise KeyError(n)
 
 # Adapted from https://github.com/Hakuyume/chainer-ssd
-def decode_boxes(loc, priors, variances: List[float]):
-    """Decode locations from predictions using priors"""
+def decode_boxes(loc, anchor_boxes, lin_scale: float=0.1, exp_scale: float=0.2):
+    """Decode locations from predictions using anchor_boxes"""
 
     boxes = torch.cat(
         (
-            priors[:, :2] + loc[:, :2] * variances[0] * priors[:, 2:],
-            priors[:, 2:] * torch.exp(loc[:, 2:] * variances[1]),
+            anchor_boxes[:, :2] + loc[:, :2] * lin_scale * anchor_boxes[:, 2:],
+            anchor_boxes[:, 2:] * torch.exp(loc[:, 2:] * exp_scale),
         ),
         dim=1,
     )
@@ -56,39 +55,61 @@ def decode_boxes(loc, priors, variances: List[float]):
     return boxes
 
 
-def decode_landms(pre, priors, variances: List[float]):
-    """Decode landm from predictions using priors"""
+def decode_landmarks(landmarks, anchor_boxes, lin_scale: float=0.1):
+    """Decode landm from predictions using anchor_boxes"""
     tmp = (
-        priors[:, :2] + pre[:, :2] * variances[0] * priors[:, 2:],
-        priors[:, :2] + pre[:, 2:4] * variances[0] * priors[:, 2:],
-        priors[:, :2] + pre[:, 4:6] * variances[0] * priors[:, 2:],
-        priors[:, :2] + pre[:, 6:8] * variances[0] * priors[:, 2:],
-        priors[:, :2] + pre[:, 8:10] * variances[0] * priors[:, 2:],
+        anchor_boxes[:, 0:2] + landmarks[:, 0:2] * lin_scale * anchor_boxes[:, 2:],
+        anchor_boxes[:, 0:2] + landmarks[:, 2:4] * lin_scale * anchor_boxes[:, 2:],
+        anchor_boxes[:, 0:2] + landmarks[:, 4:6] * lin_scale * anchor_boxes[:, 2:],
+        anchor_boxes[:, 0:2] + landmarks[:, 6:8] * lin_scale * anchor_boxes[:, 2:],
+        anchor_boxes[:, 0:2] + landmarks[:, 8:10] * lin_scale * anchor_boxes[:, 2:],
     )
     landms = torch.cat(tmp, dim=1)
     return landms
 
-
-def prior_box(H: int, W: int):
-    min_sizes = [[16, 32], [64, 128], [256, 512]]
-    steps = [8, 16, 32]
-    feature_maps = [[math.ceil(H / s), math.ceil(W / s)] for s in steps]
+def make_anchor_boxes(H: int, W:int, S: int, min_size1: int, min_size2: int):
+    s_kx1 = 1.0*min_size1/W
+    s_ky1 = 1.0*min_size1/H
+    s_kx2 = 1.0*min_size2/W
+    s_ky2 = 1.0*min_size2/H
+    H2 = math.ceil(H/S)
+    W2 = math.ceil(W/S)
 
     anchors: List[float] = []
-    for k, f in enumerate(feature_maps):
-        k_sizes = min_sizes[k]
-        for i in range(f[0]):
-            for j in range(f[1]):
-                for min_size in k_sizes:
-                    s_kx = min_size / W
-                    s_ky = min_size / H
-                    cx = (j + 0.5) * steps[k] / W
-                    cy = (i + 0.5) * steps[k] / H
-                    anchors += [cx, cy, s_kx, s_ky]
+    for i in range(H2):
+        cy = (i + 0.5)*S/H
+        for j in range(W2):
+            cx = (j + 0.5)*S/W
+            anchors += [cx, cy, s_kx1, s_ky1]
+            anchors += [cx, cy, s_kx2, s_ky2]
 
-    # return torch.Tensor(anchors).view(-1, 4)
-    return torch.tensor(anchors).view(-1, 4)  # torch.jit.script only support torch.tensor
+    return torch.tensor(anchors).view(-1, 4)
 
+
+def get_anchor_boxes(H: int, W: int):
+    # min_sizes = [[16, 32], [64, 128], [256, 512]]
+    # steps = [8, 16, 32]
+    # feature_maps = [[math.ceil(H / s), math.ceil(W / s)] for s in steps]
+
+    # anchors: List[float] = []
+    # for k, f in enumerate(feature_maps):
+    #     k_sizes = min_sizes[k]
+    #     for i in range(f[0]):
+    #         for j in range(f[1]):
+    #             for min_size in k_sizes:
+    #                 s_kx = min_size / W
+    #                 s_ky = min_size / H
+    #                 cx = (j + 0.5) * steps[k] / W
+    #                 cy = (i + 0.5) * steps[k] / H
+    #                 anchors += [cx, cy, s_kx, s_ky]
+    # anchors = torch.tensor(anchors).view(-1, 4)
+
+    b1 = make_anchor_boxes(H, W, 8, 16, 32)
+    b2 = make_anchor_boxes(H, W, 16, 64, 128)
+    b3 = make_anchor_boxes(H, W, 32, 256, 512)
+    anchors = torch.cat((b1, b2, b3), dim=0)
+
+    return anchors
 
 # def nms(boxes, scores, thresh: float):
 #     """NMS"""
@@ -297,13 +318,30 @@ class RetinaFace(nn.Module):
         self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
         self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
 
-        load_facedet(self, "../weights/facelib/detection_Resnet50_Final.pth")
+        load_facedet(self, "models/detection_Resnet50_Final.pth")
 
         self.register_buffer("mean_tensor", torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1))
-        self.half()
+        # self.half()
+
+    # def on_cuda(self):
+    #     return self.mean_tensor.is_cuda
+
+    def forward(self, x):
+        # if self.on_cuda():
+        #     x = x.half()
+
+        bgr_image = x[:, [2, 1, 0], :, :]  # change channel from RGB to BGR
+
+        B, C, H, W = bgr_image.shape
+        # mean_tensor = torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1).to(bgr_image.device)
+        # mean_tensor = torch.tensor([104., 117., 123.])
+        # 0.485, 0.456, 0.406 -- RGB ==> 104(B), 117(G), 123(R) == BGR
+
+        bgr_image = bgr_image - self.mean_tensor
+        bgr_image = bgr_image * 255.0
+        # ==> bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
 
-    def forward_x(self, bgr_image) -> List[torch.Tensor]:
         # bgr_image.size() -- [1, 3, 640, 1013]
         # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
@@ -318,20 +356,16 @@ class RetinaFace(nn.Module):
         feature3 = self.ssh3(fpn[2])
         features = [feature1, feature2, feature3]
 
-        # bbox_regressions = torch.cat([self.BboxHead[i](feature) for i, feature in enumerate(features)], dim=1)
         outs = []
         for i, head in enumerate(self.BboxHead):
             outs.append(head(features[i]))
         bbox_regressions = torch.cat(outs, dim=1)
 
-        # classifications = torch.cat([self.ClassHead[i](feature) for i, feature in enumerate(features)], dim=1)
         outs = []
         for i, head in enumerate(self.ClassHead):
             outs.append(head(features[i]))
         classifications = torch.cat(outs, dim=1)
 
-        # tmp = [self.LandmarkHead[i](feature) for i, feature in enumerate(features)]
-        # ldm_regressions = torch.cat(tmp, dim=1)
         outs = []
         for i, head in enumerate(self.LandmarkHead):
             outs.append(head(features[i]))
@@ -340,61 +374,48 @@ class RetinaFace(nn.Module):
         # classifications.shape -- [1, 26720, 2]
         # ldm_regressions.shape -- [1, 26720, 10]
 
-        output = (bbox_regressions, F.softmax(classifications, dim=2), ldm_regressions)
-        # (Pdb) output[0].size() -- [1, 26720, 4]
-        # (Pdb) output[1].size() -- [1, 26720, 2]
-        # (Pdb) output[2].size() -- [1, 26720, 10]
+        conf = F.softmax(classifications, dim=2).squeeze(0)
+        loc = bbox_regressions.squeeze(0)
+        landmarks = ldm_regressions.squeeze(0)
+        # (Pdb) loc.size() -- [26720, 4]
+        # (Pdb) conf.size() -- [26720, 2]
+        # (Pdb) landmarks.size() -- [26720, 10]
 
-        return output
+        conf_loc_landmarks = torch.cat((conf, loc, landmarks), dim=1)
+        return conf_loc_landmarks
 
-    def on_cuda(self):
-        return self.mean_tensor.is_cuda
 
-    def forward(self, x):
-        if self.on_cuda():
-            x = x.half()
+def decode_conf_loc_landmarks(conf_loc_landmarks, bgr_image):
+    B, C, H, W = bgr_image.size()
+    anchor_boxes = get_anchor_boxes(H=H, W=W).to(bgr_image.device)  # [26720, 4]
 
-        bgr_image = x[:, [2, 1, 0], :, :]  # change channel from RGB to BGR
+    conf = conf_loc_landmarks[:, 0:2]
+    loc = conf_loc_landmarks[:, 2:6]
+    landmarks = conf_loc_landmarks[:, 6:16]    
+    scores = conf[:, 1]  # [26720]
 
-        B, C, H, W = bgr_image.shape
-        # mean_tensor = torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1).to(bgr_image.device)
-        # mean_tensor = torch.tensor([104., 117., 123.])
-        # 0.485, 0.456, 0.406 -- RGB ==> 104(B), 117(G), 123(R) == BGR
+    boxes = decode_boxes(loc, anchor_boxes, lin_scale=0.1, exp_scale=0.2)
+    boxes = boxes * torch.tensor([W, H, W, H], dtype=torch.float32).to(bgr_image.device)
+    # boxes.size() -- [26720, 4]
 
-        bgr_image = bgr_image - self.mean_tensor
-        bgr_image = bgr_image * 255.0
-        # ==> bgr_image.dtype -- torch.float32, [-123.0, 151.0]
+    landmarks = decode_landmarks(landmarks, anchor_boxes, lin_scale=0.1)
+    landmarks = landmarks * torch.tensor([W, H] * 5, dtype=torch.float32).to(bgr_image.device)
+    # landmarks.size() -- [26720, 10]
 
-        loc, conf, landmarks = self.forward_x(bgr_image)
-        # (Pdb) loc.size() -- [1, 26720, 4]
-        # (Pdb) conf.size() -- [1, 26720, 2]
-        # (Pdb) landmarks.size() -- [1, 26720, 10]
+    # Filter low scores
+    conf_threshold = 0.80
+    inds = torch.where(conf[:, 1] > conf_threshold)[0]  #  -- torch.int64
+    boxes, landmarks, scores = boxes[inds], landmarks[inds], scores[inds]
+    # boxes.size() -- [57, 4], scores.size() -- [57], landmarks.size() -- [57, 10]
 
-        priors = prior_box(H=H, W=W).to(bgr_image.device)  # [26720, 4]
+    # Sort scores
+    order = scores.argsort(descending=True)
+    boxes, landmarks, scores = boxes[order], landmarks[order], scores[order]
 
-        boxes = decode_boxes(loc.squeeze(0), priors, [0.1, 0.2])
-        boxes = boxes * torch.tensor([W, H, W, H], dtype=torch.float32).to(bgr_image.device)
-        # boxes.size() -- [28952, 4]
+    # do NMS
+    nms_threshold = 0.40
+    keep = nms(boxes, scores, nms_threshold)
 
-        scores = conf.squeeze(0)[:, 1]  # [28952]
-        landmarks = decode_landms(landmarks.squeeze(0), priors, [0.1, 0.2])
-        landmarks = landmarks * torch.tensor([W, H] * 5, dtype=torch.float32).to(bgr_image.device)
-        # landmarks.size() -- [28952, 10]
+    boxes, landmarks, scores = boxes[keep], landmarks[keep], scores[keep]
 
-        # Filter low scores
-        conf_threshold = 0.8
-        inds = torch.where(conf.squeeze(0)[:, 1] > conf_threshold)[0]  #  -- torch.int64
-        boxes, landmarks, scores = boxes[inds], landmarks[inds], scores[inds]
-        # boxes.size() -- [57, 4], scores.size() -- [57], landmarks.size() -- [57, 10]
-
-        # Sort scores
-        order = scores.argsort(descending=True)
-        boxes, landmarks, scores = boxes[order], landmarks[order], scores[order]
-
-        # do NMS
-        nms_threshold = 0.4
-        keep = nms(boxes, scores, nms_threshold)
-
-        boxes, landmarks, scores = boxes[keep], landmarks[keep], scores[keep]
-
-        return torch.cat((boxes, scores[:, None], landmarks), dim=1).float()  # [2, 15]
+    return torch.cat((boxes, scores[:, None], landmarks), dim=1)  # [2, 15]
