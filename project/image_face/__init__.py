@@ -81,16 +81,16 @@ def get_face_model():
 
     print(f"Running on {device} ...")
 
-    # make sure model good for C/C++
-    model = torch.jit.script(model)
-    # https://github.com/pytorch/pytorch/issues/52286
-    torch._C._jit_set_profiling_executor(False)
-    # C++ Reference
-    # torch::jit::getProfilingMode() = false;                                                                                                             
-    # torch::jit::setTensorExprFuserEnabled(false);
-    todos.data.mkdir("output")
-    if not os.path.exists("output/image_face.torch"):
-        model.save("output/image_face.torch")
+    # # make sure model good for C/C++
+    # model = torch.jit.script(model)
+    # # https://github.com/pytorch/pytorch/issues/52286
+    # torch._C._jit_set_profiling_executor(False)
+    # # C++ Reference
+    # # torch::jit::getProfilingMode() = false;                                                                                                             
+    # # torch::jit::setTensorExprFuserEnabled(false);
+    # todos.data.mkdir("output")
+    # if not os.path.exists("output/image_face.torch"):
+    #     model.save("output/image_face.torch")
 
     return model, device
 

@@ -13,9 +13,6 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-# import torchvision
-
 from typing import List
 from . import resnet
 
@@ -42,7 +39,6 @@ def load_facedet(model, path):
 # Adapted from https://github.com/Hakuyume/chainer-ssd
 def decode_boxes(loc, anchor_boxes, lin_scale: float=0.1, exp_scale: float=0.2):
     """Decode locations from predictions using anchor_boxes"""
-
     boxes = torch.cat(
         (
             anchor_boxes[:, :2] + loc[:, :2] * lin_scale * anchor_boxes[:, 2:],
@@ -52,11 +48,13 @@ def decode_boxes(loc, anchor_boxes, lin_scale: float=0.1, exp_scale: float=0.2):
     )
     boxes[:, :2] -= boxes[:, 2:] / 2
     boxes[:, 2:] += boxes[:, :2]
+
     return boxes
 
 
 def decode_landmarks(landmarks, anchor_boxes, lin_scale: float=0.1):
     """Decode landm from predictions using anchor_boxes"""
+
     tmp = (
         anchor_boxes[:, 0:2] + landmarks[:, 0:2] * lin_scale * anchor_boxes[:, 2:],
         anchor_boxes[:, 0:2] + landmarks[:, 2:4] * lin_scale * anchor_boxes[:, 2:],
@@ -65,6 +63,7 @@ def decode_landmarks(landmarks, anchor_boxes, lin_scale: float=0.1):
         anchor_boxes[:, 0:2] + landmarks[:, 8:10] * lin_scale * anchor_boxes[:, 2:],
     )
     landms = torch.cat(tmp, dim=1)
+
     return landms
 
 def make_anchor_boxes(H: int, W:int, S: int, min_size1: int, min_size2: int):
@@ -87,29 +86,17 @@ def make_anchor_boxes(H: int, W:int, S: int, min_size1: int, min_size2: int):
 
 
 def get_anchor_boxes(H: int, W: int):
-    # min_sizes = [[16, 32], [64, 128], [256, 512]]
-    # steps = [8, 16, 32]
-    # feature_maps = [[math.ceil(H / s), math.ceil(W / s)] for s in steps]
-
-    # anchors: List[float] = []
-    # for k, f in enumerate(feature_maps):
-    #     k_sizes = min_sizes[k]
-    #     for i in range(f[0]):
-    #         for j in range(f[1]):
-    #             for min_size in k_sizes:
-    #                 s_kx = min_size / W
-    #                 s_ky = min_size / H
-    #                 cx = (j + 0.5) * steps[k] / W
-    #                 cy = (i + 0.5) * steps[k] / H
-    #                 anchors += [cx, cy, s_kx, s_ky]
-    # anchors = torch.tensor(anchors).view(-1, 4)
-
+    # H = 351, W = 500
     b1 = make_anchor_boxes(H, W, 8, 16, 32)
     b2 = make_anchor_boxes(H, W, 16, 64, 128)
     b3 = make_anchor_boxes(H, W, 32, 256, 512)
     anchors = torch.cat((b1, b2, b3), dim=0)
 
-    return anchors
+    # (Pdb) b1.size() -- [5544, 4]
+    # (Pdb) b2.size() -- [1408, 4]
+    # (Pdb) b3.size() -- [352, 4]
+
+    return anchors # size() -- [7304, 4]
 
 # def nms(boxes, scores, thresh: float):
 #     """NMS"""
@@ -377,15 +364,17 @@ class RetinaFace(nn.Module):
         conf = F.softmax(classifications, dim=2).squeeze(0)
         loc = bbox_regressions.squeeze(0)
         landmarks = ldm_regressions.squeeze(0)
-        # (Pdb) loc.size() -- [26720, 4]
         # (Pdb) conf.size() -- [26720, 2]
+        # (Pdb) loc.size() -- [26720, 4]
         # (Pdb) landmarks.size() -- [26720, 10]
 
         conf_loc_landmarks = torch.cat((conf, loc, landmarks), dim=1)
-        return conf_loc_landmarks
+        return conf_loc_landmarks.unsqueeze(0).unsqueeze(0) # [1, 1, 26720, 16] extend dim for onnx output
 
 
 def decode_conf_loc_landmarks(conf_loc_landmarks, bgr_image):
+    conf_loc_landmarks = conf_loc_landmarks.squeeze(0).squeeze(0) # [1, 1, 26720, 16] ==> [26720, 16]
+
     B, C, H, W = bgr_image.size()
     anchor_boxes = get_anchor_boxes(H=H, W=W).to(bgr_image.device)  # [26720, 4]
 

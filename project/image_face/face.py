@@ -15,6 +15,7 @@ from torch.nn import functional as F
 from . import facedet, facegan
 
 from typing import List
+import todos
 
 import pdb
 
@@ -32,9 +33,35 @@ def get_affine_matrix(landmarks, std_landmarks):
         Q[i * 2 + 1] = torch.tensor([y, -x, 0.0, 1.0]).to(landmarks.device)
 
     M = torch.linalg.lstsq(Q, S).solution.view(-1) # onnx not support
+    # ==> (Q @ M).view(5, 2) ==~~== S.view(5, 2)
+
+    # (Pdb) Q.size() -- [10, 4]
+    # tensor([[ 324.868744,  133.635284,    1.000000,    0.000000],
+    #         [ 133.635284, -324.868744,    0.000000,    1.000000],
+    #         [ 372.724915,  132.330826,    1.000000,    0.000000],
+    #         [ 132.330826, -372.724915,    0.000000,    1.000000],
+    #         [ 347.212708,  158.984650,    1.000000,    0.000000],
+    #         [ 158.984650, -347.212708,    0.000000,    1.000000],
+    #         [ 328.528015,  176.166473,    1.000000,    0.000000],
+    #         [ 176.166473, -328.528015,    0.000000,    1.000000],
+    #         [ 372.120667,  175.495361,    1.000000,    0.000000],
+    #         [ 175.495361, -372.120667,    0.000000,    1.000000]], device='cuda:0')
+    # (Pdb) S.size() -- [10]
+    # tensor([192.981384, 239.947083, 318.902771, 240.193604, 256.634155, 314.019348,
+    #         201.261169, 371.410431, 313.089050, 371.151184], device='cuda:0')
+    # (Pdb) pp M.size() -- [4]
+    # tensor([     2.807229,     -0.063590,   -713.527405,   -150.880234],
+    #        device='cuda:0')
+
     matrix = torch.tensor(
-        [[float(M[0]), float(M[1]), float(M[2])], [float(-M[1]), float(M[0]), float(M[3])], [0.0, 0.0, 1.0]]
+        [[float(M[0]),  float(M[1]), float(M[2])], 
+         [float(-M[1]), float(M[0]), float(M[3])],
+         [0.0, 0.0, 1.0]]
     ).to(landmarks.device)
+    # (Pdb) matrix.size() -- [3, 3]
+    # tensor([[     2.807229,     -0.063590,   -713.527405],
+    #         [     0.063590,      2.807229,   -150.880234],
+    #         [     0.000000,      0.000000,      1.000000]], device='cuda:0')
 
     # ==> matrix @ landmarks[i].view(3, 1）-- stdard landmaks
 
@@ -55,10 +82,14 @@ def get_affine_image(image, matrix, OH: int, OW: int):
     # torch.onnx.register_custom_op_symbolic("aten::linalg_inv", aten_linalg_inv, 17)
 
     theta = torch.linalg.inv(T2 @ matrix @ torch.linalg.inv(T1))
+    # tensor([[     0.364586,      0.008259,      0.393890],
+    #         [    -0.011765,      0.519353,     -0.219108],
+    #         [     0.000000,      0.000000,      1.000000]], device='cuda:0')
     theta = theta[0:2, :].view(-1, 2, 3)
+    grid = F.affine_grid(theta, size=[B, C, OH, OW], align_corners=False) # [1, 512, 512, 2]
+    # tensor [grid] size: [1, 512, 512, 2], min: -0.749188, max: 0.766006, mean: 0.087391
 
-    grid = F.affine_grid(theta, size=[B, C, OH, OW], align_corners=False)
-    return F.grid_sample(image.to(torch.float32), grid, mode="bilinear", padding_mode="zeros", align_corners=False)
+    return F.grid_sample(image, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
 
 
 # def image_mask_erode(bin_img, ksize=7):
@@ -86,10 +117,11 @@ class FaceModel(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.MAX_H = 2024
-        self.MAX_W = 2024
+        self.MAX_H = 2048
+        self.MAX_W = 4096
         self.MAX_TIMES = 1
-        # GPU half model -- 2.5G, 110ms, cpu -- 3200 ms
+        # GPU 2024x2024 -- 2.5G, 110ms, cpu -- 3200 ms
+        # GPU 2048x4096 -- 7.0G, 250ms
 
         # standard 5 landmarks for FFHQ faces with 512 x 512
         self.STANDARD_FACE_SIZE = 512
@@ -120,7 +152,7 @@ class FaceModel(nn.Module):
         face_mask = F.conv2d(face_mask, kernel, padding=2, groups=1)
         self.register_buffer("face_mask", face_mask)
         self.register_buffer("STANDARD_FACE_LANDMARKS", torch.tensor(STANDARD_FACE_LANDMARKS))
-        self.min_eyes_distance = 15.0
+        self.min_eyes_distance = 10.0
 
         self.facedet = facedet.RetinaFace()
         self.facegan = facegan.CodeFormer()
@@ -142,6 +174,7 @@ class FaceModel(nn.Module):
             M = get_affine_matrix(landmark, self.STANDARD_FACE_LANDMARKS)
             cropped_face = get_affine_image(x, M, self.STANDARD_FACE_SIZE, self.STANDARD_FACE_SIZE)
             refined_face = self.facegan(cropped_face)
+
 
             # save detected face
             faces.append(cropped_face)

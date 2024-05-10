@@ -139,8 +139,7 @@ class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, emb_dim, beta):
         super().__init__()
         self.codebook_size = codebook_size  # number of embeddings
-        self.emb_dim = emb_dim  # dimension of embedding
-        self.embedding = nn.Embedding(self.codebook_size, self.emb_dim)
+        self.embedding = nn.Embedding(self.codebook_size, emb_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.codebook_size, 1.0 / self.codebook_size)
 
     def forward(self, z):
@@ -149,7 +148,6 @@ class VectorQuantizer(nn.Module):
 
     def get_codebook_feat(self, indices, shape: List[int]):
         # input indices: batch*token_num -> (batch*token_num)*1
-
         b, c, n = indices.size()
         indices = indices.view(b * c * n, 1)
         min_encodings = torch.zeros(b * c * n, self.codebook_size).to(indices)
@@ -190,13 +188,12 @@ class Upsample(nn.Module):
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels=None):
         super().__init__()
-        self.in_channels = in_channels
         self.out_channels = in_channels if out_channels is None else out_channels
         self.norm1 = normalize(in_channels)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.norm2 = normalize(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        if self.in_channels != self.out_channels:
+        if in_channels != self.out_channels:
             self.conv_out = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
         else:
             self.conv_out = nn.Identity()
@@ -218,8 +215,6 @@ class ResBlock(nn.Module):
 class AttnBlock(nn.Module):
     def __init__(self, in_channels):
         super().__init__()
-        self.in_channels = in_channels
-
         self.norm = normalize(in_channels)
         self.q = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0)
         self.k = nn.Conv2d(in_channels, in_channels, kernel_size=1, stride=1, padding=0)
@@ -257,13 +252,9 @@ class AttnBlock(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, in_channels, nf, emb_dim, ch_mult, num_res_blocks, resolution, attn_resolutions):
         super().__init__()
-        self.nf = nf
+        # self.nf = nf
         self.num_resolutions = len(ch_mult)
-        self.num_res_blocks = num_res_blocks
-        self.resolution = resolution
-        self.attn_resolutions = attn_resolutions
-
-        curr_res = self.resolution
+        curr_res = resolution
         in_ch_mult = (1,) + tuple(ch_mult)
 
         blocks = []
@@ -274,7 +265,7 @@ class Encoder(nn.Module):
         for i in range(self.num_resolutions):
             block_in_ch = nf * in_ch_mult[i]
             block_out_ch = nf * ch_mult[i]
-            for _ in range(self.num_res_blocks):
+            for _ in range(num_res_blocks):
                 blocks.append(ResBlock(block_in_ch, block_out_ch))
                 block_in_ch = block_out_ch
                 if curr_res in attn_resolutions:
@@ -304,19 +295,13 @@ class Encoder(nn.Module):
 class Generator(nn.Module):
     def __init__(self, nf, emb_dim, ch_mult, res_blocks, img_size, attn_resolutions):
         super().__init__()
-        self.nf = nf
-        self.ch_mult = ch_mult
-        self.num_resolutions = len(self.ch_mult)
-        self.num_res_blocks = res_blocks
-        self.resolution = img_size
-        self.attn_resolutions = attn_resolutions
-        self.in_channels = emb_dim
-        block_in_ch = self.nf * self.ch_mult[-1]
-        curr_res = self.resolution // 2 ** (self.num_resolutions - 1)
+        self.num_resolutions = len(ch_mult)
+        block_in_ch = nf * ch_mult[-1]
+        curr_res = img_size // 2 ** (self.num_resolutions - 1)
 
         blocks = []
         # initial conv
-        blocks.append(nn.Conv2d(self.in_channels, block_in_ch, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.Conv2d(emb_dim, block_in_ch, kernel_size=3, stride=1, padding=1))
 
         # non-local attention block
         blocks.append(ResBlock(block_in_ch, block_in_ch))
@@ -324,13 +309,13 @@ class Generator(nn.Module):
         blocks.append(ResBlock(block_in_ch, block_in_ch))
 
         for i in reversed(range(self.num_resolutions)):
-            block_out_ch = self.nf * self.ch_mult[i]
+            block_out_ch = nf * ch_mult[i]
 
-            for _ in range(self.num_res_blocks):
+            for _ in range(res_blocks):
                 blocks.append(ResBlock(block_in_ch, block_out_ch))
                 block_in_ch = block_out_ch
 
-                if curr_res in self.attn_resolutions:
+                if curr_res in attn_resolutions:
                     blocks.append(AttnBlock(block_in_ch))
 
             if i != 0:
@@ -361,27 +346,18 @@ class VQAutoEncoder(nn.Module):
         beta=0.25,
     ):
         super().__init__()
-        self.in_channels = 3
-        self.nf = nf
-        self.n_blocks = res_blocks
-        self.codebook_size = codebook_size
-        self.embed_dim = emb_dim
-        self.ch_mult = ch_mult
-        self.resolution = img_size
-        self.attn_resolutions = attn_resolutions
         self.encoder = Encoder(
-            self.in_channels,
-            self.nf,
-            self.embed_dim,
-            self.ch_mult,
-            self.n_blocks,
-            self.resolution,
-            self.attn_resolutions,
+            3,
+            nf,
+            emb_dim,
+            ch_mult,
+            res_blocks,
+            img_size,
+            attn_resolutions,
         )
-        self.beta = beta  # 0.25
-        self.quantize = VectorQuantizer(self.codebook_size, self.embed_dim, self.beta)
+        self.quantize = VectorQuantizer(codebook_size, emb_dim, beta)
         self.generator = Generator(
-            self.nf, self.embed_dim, self.ch_mult, self.n_blocks, self.resolution, self.attn_resolutions
+            nf, emb_dim, ch_mult, res_blocks, img_size, attn_resolutions
         )
 
     def forward(self, x):
@@ -397,10 +373,7 @@ def calc_mean_std(feat, eps: float = 1e-5) -> List[torch.Tensor]:
         eps (float): A small value added to the variance to avoid
             divide-by-zero. Default: 1e-5.
     """
-    size = feat.size()
-    assert len(size) == 4, "The input feature should be 4D tensor."
-    # b, c = size[:2]
-    b, c, h, w = size
+    b, c, h, w = feat.size()
     feat_var = feat.view(b, c, h * w).var(dim=2) + eps
     feat_std = feat_var.sqrt().view(b, c, 1, 1)
     feat_mean = feat.view(b, c, h * w).mean(dim=2).view(b, c, 1, 1)
@@ -409,13 +382,8 @@ def calc_mean_std(feat, eps: float = 1e-5) -> List[torch.Tensor]:
 
 def adaptive_instance_normalization(content_feat, style_feat):
     """Adaptive instance normalization.
-
     Adjust the reference features to have the similar color and illuminations
     as those in the degradate features.
-
-    Args:
-        content_feat (Tensor): The reference feature.
-        style_feat (Tensor): The degradate features.
     """
     size = content_feat.size()
     style_mean, style_std = calc_mean_std(style_feat)
@@ -473,7 +441,6 @@ class CodeFormer(VQAutoEncoder):
             for param in getattr(self, module).parameters():
                 param.requires_grad = False
 
-        self.n_layers = n_layers
         self.position_emb = nn.Parameter(torch.zeros(latent_size, dim_embd))
         self.feat_emb = nn.Linear(256, dim_embd)
 
@@ -481,7 +448,7 @@ class CodeFormer(VQAutoEncoder):
         self.ft_layers = nn.Sequential(
             *[
                 TransformerSALayer(embed_dim=dim_embd, nhead=n_head, dim_mlp=dim_embd * 2, dropout=0.0)
-                for _ in range(self.n_layers)
+                for _ in range(n_layers)
             ]
         )
 
@@ -526,4 +493,4 @@ class CodeFormer(VQAutoEncoder):
 
         out = (out + 1.0) / 2.0  # change from [-1.0, 1.0] to [0.0, 1.0]
 
-        return out.clamp(0.0, 1.0).float()
+        return out.clamp(0.0, 1.0)
