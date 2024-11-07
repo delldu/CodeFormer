@@ -47,11 +47,9 @@ def swish(x):
     return x * torch.sigmoid(x)
 
 class Linear(nn.Module):
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int):
         super().__init__()
-        # in_features = 512
-        # out_features = 512
-        # bias = True
+        assert in_features == 512 and out_features == 512
 
         self.in_features = in_features
         self.out_features = out_features
@@ -110,17 +108,16 @@ def multi_head_attention_forward(query, key, value, num_heads: int,
 
 
 class MultiheadAttention(nn.Module):
-    def __init__(self, embed_dim, num_heads, bias=True):
+    def __init__(self, embed_dim=512, num_heads=8):
         super().__init__()
-        # embed_dim = 512
-        # num_heads = 8
+        assert embed_dim == 512 and num_heads == 8
 
         self.num_heads = num_heads
-        self.head_dim = embed_dim // num_heads
+        self.head_dim = embed_dim // num_heads # ==> 64
         self.in_proj_weight = nn.Parameter(torch.zeros((3 * embed_dim, embed_dim)))
 
         self.in_proj_bias = nn.Parameter(torch.zeros(3 * embed_dim))
-        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = Linear(embed_dim, embed_dim)
 
 
     def forward(self, query, key, value):
@@ -136,24 +133,15 @@ class MultiheadAttention(nn.Module):
 
 
 class VectorQuantizer(nn.Module):
-    def __init__(self, codebook_size, emb_dim, beta):
+    def __init__(self):
         super().__init__()
-        # codebook_size = 1024
-        # emb_dim = 256
-        # beta = 0.25
-        self.codebook_size = codebook_size  # number of embeddings
-        self.embedding = nn.Embedding(self.codebook_size, emb_dim)
-        self.embedding.weight.data.uniform_(-1.0 / self.codebook_size, 1.0 / self.codebook_size)
+        self.embedding = nn.Embedding(1024, 256)
 
-    def forward(self, z):
-        #### useless, place holder function ####
-        return z
-
-    def get_codebook_feat(self, indices, shape: List[int]):
+    def forward(self, indices, shape: List[int]):
         # input indices: batch*token_num -> (batch*token_num)*1
         b, c, n = indices.size() # (1, 256, 1)
         indices = indices.view(b * c * n, 1) # [256, 1]
-        min_encodings = torch.zeros(b * c * n, self.codebook_size).to(indices)
+        min_encodings = torch.zeros(b * c * n, 1024).to(indices)
 
         min_encodings.scatter_(1, indices, 1)
         # tensor [min_encodings] size: [256, 1024], min: 0.0, max: 1.0, mean: 0.000977
@@ -190,14 +178,13 @@ class Upsample(nn.Module):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels=None):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.out_channels = in_channels if out_channels is None else out_channels
         self.norm1 = normalize(in_channels)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
         self.norm2 = normalize(out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1)
-        if in_channels != self.out_channels:
+        if in_channels != out_channels:
             self.conv_out = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
         else:
             self.conv_out = nn.Identity()
@@ -254,33 +241,28 @@ class AttnBlock(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_channels, nf, emb_dim, ch_mult, num_res_blocks, resolution, attn_resolutions):
+    def __init__(self, in_channels, nf=64):
         super().__init__()
         # in_channels = 3
-        # nf = 64
-        # emb_dim = 256
-        # ch_mult = [1, 2, 2, 4, 4, 8]
-        # num_res_blocks = 2
-        # resolution = 512
-        # attn_resolutions = [16]
+        assert nf == 64
 
-        # self.nf = nf
+        ch_mult = [1, 2, 2, 4, 4, 8]
         self.num_resolutions = len(ch_mult)
-        curr_res = resolution
         in_ch_mult = (1,) + tuple(ch_mult)
+        # in_ch_mult == (1, 1, 2, 2, 4, 4, 8)
 
         blocks = []
-        # initial convultion
         blocks.append(nn.Conv2d(in_channels, nf, kernel_size=3, stride=1, padding=1))
 
-        # residual and downsampling blocks, with attention on smaller res (16x16)
-        for i in range(self.num_resolutions):
+        assert self.num_resolutions == 6
+        curr_res = 512
+        for i in range(self.num_resolutions): # 6
             block_in_ch = nf * in_ch_mult[i]
             block_out_ch = nf * ch_mult[i]
-            for _ in range(num_res_blocks):
+            for _ in range(2):
                 blocks.append(ResBlock(block_in_ch, block_out_ch))
                 block_in_ch = block_out_ch
-                if curr_res in attn_resolutions:
+                if curr_res in [16]:
                     blocks.append(AttnBlock(block_in_ch))
 
             if i != self.num_resolutions - 1:
@@ -288,15 +270,15 @@ class Encoder(nn.Module):
                 curr_res = curr_res // 2
 
         # non-local attention block
+        assert block_in_ch == 512
         blocks.append(ResBlock(block_in_ch, block_in_ch))
         blocks.append(AttnBlock(block_in_ch))
         blocks.append(ResBlock(block_in_ch, block_in_ch))
 
         # normalise and convert to latent size
         blocks.append(normalize(block_in_ch))
-        blocks.append(nn.Conv2d(block_in_ch, emb_dim, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.Conv2d(block_in_ch, 256, kernel_size=3, stride=1, padding=1))
         self.blocks = nn.ModuleList(blocks)
-        # pdb.set_trace()
 
     def forward(self, x):
         for block in self.blocks:
@@ -306,22 +288,18 @@ class Encoder(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, nf, emb_dim, ch_mult, res_blocks, img_size, attn_resolutions):
+    def __init__(self, nf=64):
         super().__init__()
-        # nf = 64
-        # emb_dim = 256
-        # ch_mult = [1, 2, 2, 4, 4, 8]
-        # res_blocks = 2
-        # img_size = 512
-        # attn_resolutions = [16]
+        assert nf == 64
 
+        ch_mult = [1, 2, 2, 4, 4, 8]
         self.num_resolutions = len(ch_mult) # 6 
-        block_in_ch = nf * ch_mult[-1]
-        curr_res = img_size // 2 ** (self.num_resolutions - 1)
+        block_in_ch = nf * ch_mult[-1] # ==> 512
+        curr_res = 16 # 512 // 2 ** (self.num_resolutions - 1) # 16
 
         blocks = []
         # initial conv
-        blocks.append(nn.Conv2d(emb_dim, block_in_ch, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.Conv2d(256, block_in_ch, kernel_size=3, stride=1, padding=1))
 
         # non-local attention block
         blocks.append(ResBlock(block_in_ch, block_in_ch))
@@ -331,11 +309,11 @@ class Generator(nn.Module):
         for i in reversed(range(self.num_resolutions)): # 6
             block_out_ch = nf * ch_mult[i]
 
-            for _ in range(res_blocks): # 2
+            for _ in range(2): # 2
                 blocks.append(ResBlock(block_in_ch, block_out_ch))
                 block_in_ch = block_out_ch
 
-                if curr_res in attn_resolutions:
+                if curr_res in [16]:
                     blocks.append(AttnBlock(block_in_ch))
 
             if i != 0:
@@ -353,38 +331,6 @@ class Generator(nn.Module):
             x = block(x)
 
         return x
-
-
-class VQAutoEncoder(nn.Module):
-    def __init__(self, 
-        img_size=512, 
-        nf=64, 
-        ch_mult = [1, 2, 2, 4, 4, 8],
-        res_blocks=2,
-        attn_resolutions=[16],
-        codebook_size=1024,
-        emb_dim=256,
-        beta=0.25,
-    ):
-        super().__init__()
-        self.encoder = Encoder(
-            3,
-            nf,
-            emb_dim,
-            ch_mult,
-            res_blocks,
-            img_size,
-            attn_resolutions,
-        )
-        self.quantize = VectorQuantizer(codebook_size, emb_dim, beta)
-        self.generator = Generator(
-            nf, emb_dim, ch_mult, res_blocks, img_size, attn_resolutions
-        )
-
-    def forward(self, x):
-        #### useless, place holder function ####
-        return x
-
 
 def calc_mean_std(feat, eps: float = 1e-5) -> List[torch.Tensor]:
     """Calculate mean and std for adaptive_instance_normalization.
@@ -413,74 +359,59 @@ def adaptive_instance_normalization(content_feat, style_feat):
     return normalized_feat * style_std.expand(size) + style_mean.expand(size)
 
 class TransformerSALayer(nn.Module):
-    def __init__(self, embed_dim, nhead=8, dim_mlp=2048, dropout=0.0):
+    def __init__(self):
         super().__init__()
-        self.self_attn = MultiheadAttention(embed_dim, nhead)
+        self.self_attn = MultiheadAttention(512, 8)
 
         # Implementation of Feedforward model - MLP
-        self.linear1 = nn.Linear(embed_dim, dim_mlp)
-        self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_mlp, embed_dim)
-
-        self.norm1 = nn.LayerNorm(embed_dim)
-        self.norm2 = nn.LayerNorm(embed_dim)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-
-    def with_pos_embed(self, tensor, pos: Optional[torch.Tensor]): # make torch.jit.script happy
-        # pos != None
-        return tensor if pos is None else tensor + pos
+        self.linear1 = nn.Linear(512, 1024)
+        self.linear2 = nn.Linear(1024, 512)
+        self.norm1 = nn.LayerNorm(512)
+        self.norm2 = nn.LayerNorm(512)
 
     def forward(self, target, query_pos: Optional[torch.Tensor]=None):
         # self attention
         target2 = self.norm1(target)
-        q = k = self.with_pos_embed(target2, query_pos)
-        target2 = self.self_attn(q, k, value=target2)
+        q = k = target2 + query_pos
 
-        target = target + self.dropout1(target2)
+        target2 = self.self_attn(q, k, value=target2)
+        target = target + target2
 
         # ffn
         target2 = self.norm2(target)
-        target2 = self.linear2(self.dropout(F.gelu(self.linear1(target2))))
+        target2 = self.linear2(F.gelu(self.linear1(target2)))
+        target = target + target2
 
-        target = target + self.dropout2(target2)
         return target
 
 
-class CodeFormer(VQAutoEncoder):
-    def __init__(self,
-        dim_embd=512,
-        n_head=8,
-        n_layers=9,
-        codebook_size=1024,
-        latent_size=256,
-        fix_modules=["quantize", "generator"],
-    ):
+class CodeFormer(nn.Module):
+    def __init__(self, nf=64):
         super().__init__()
+        assert nf == 64
 
+        self.encoder = Encoder(3, nf)
+        self.quantize = VectorQuantizer()
+        self.generator = Generator(nf)
+
+        fix_modules=["quantize", "generator"]
         for module in fix_modules:
             for param in getattr(self, module).parameters():
                 param.requires_grad = False
 
-        self.position_emb = nn.Parameter(torch.zeros(latent_size, dim_embd))
-        self.feat_emb = nn.Linear(256, dim_embd)
+        self.position_emb = nn.Parameter(torch.zeros(256, 512))
+        self.feat_emb = nn.Linear(256, 512)
 
         # transformer
         self.ft_layers = nn.Sequential(
-            *[
-                TransformerSALayer(embed_dim=dim_embd, nhead=n_head, dim_mlp=dim_embd * 2, dropout=0.0)
-                for _ in range(n_layers)
-            ]
+            *[TransformerSALayer()  for _ in range(9)] # n_layers -- 9
         )
 
         # logits_predict head
-        self.idx_pred_layer = nn.Sequential(nn.LayerNorm(dim_embd), nn.Linear(dim_embd, codebook_size, bias=False))
+        self.idx_pred_layer = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, 1024, bias=False))
 
         load_facegan(self, "models/codeformer.pth")
         # self.half()
-
-    # def on_cuda(self):
-    #     return self.position_emb.is_cuda
 
     def forward(self, x):
         # if self.on_cuda():
@@ -505,7 +436,7 @@ class CodeFormer(VQAutoEncoder):
 
         soft_one_hot = F.softmax(logits, dim=2)
         _, top_index = torch.topk(soft_one_hot, 1, dim=2)
-        quant_feat = self.quantize.get_codebook_feat(top_index, shape=[x.shape[0], 16, 16, 256])
+        quant_feat = self.quantize(top_index, shape=[x.shape[0], 16, 16, 256])
 
         x = adaptive_instance_normalization(quant_feat, lq_feat)
 
