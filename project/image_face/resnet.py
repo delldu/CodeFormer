@@ -29,13 +29,13 @@ class BasicBlock(nn.Module):
         dilation=1,
     ):
         super().__init__()
-        norm_layer = nn.BatchNorm2d
+        # norm_layer = nn.BatchNorm2d
 
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = norm_layer(planes)
+        self.bn1 = nn.BatchNorm2d(planes)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = norm_layer(planes)
+        self.bn2 = nn.BatchNorm2d(planes)
 
     def forward(self, x):
         identity = x
@@ -67,22 +67,15 @@ class Bottleneck(nn.Module):
         planes: int,
         stride=1,
         downsample: Optional[nn.Module] = None,
-        groups=1,
-        base_width=64,
-        dilation=1,
-        norm_layer=nn.BatchNorm2d,
+        # norm_layer=nn.BatchNorm2d,
     ):
         super().__init__()
-        assert groups == 1 and dilation == 1 and base_width == 64 and stride == 1
-
-        width = int(planes * (base_width / 64.0)) * groups
-        # Both self.conv2 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv1x1(inplanes, width)
-        self.bn1 = norm_layer(width)
-        self.conv2 = conv3x3(width, width, stride, groups, dilation)
-        self.bn2 = norm_layer(width)
-        self.conv3 = conv1x1(width, planes * self.expansion)
-        self.bn3 = norm_layer(planes * self.expansion)
+        self.conv1 = conv1x1(inplanes, planes)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv2 = conv3x3(planes, planes, stride, 1, 1)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv3 = conv1x1(planes, planes * 4)
+        self.bn3 = nn.BatchNorm2d(planes * 4)
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
@@ -119,17 +112,17 @@ class ResNet3Layers(nn.Module):
     ):
         super().__init__()
 
-        norm_layer = nn.BatchNorm2d
-        self._norm_layer = norm_layer
+        # norm_layer = nn.BatchNorm2d
+        # self._norm_layer = norm_layer
 
         self.inplanes = 64
         self.groups = groups
         self.base_width = width_per_group
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = norm_layer(self.inplanes)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer1 = self._make_layer(block, 64, layers[0])
+        self.layer1 = self._make_layer(block, 64, layers[0], stride=1)
         self.layer2 = self._make_layer(block, 128, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2)
@@ -137,33 +130,23 @@ class ResNet3Layers(nn.Module):
 
         # pdb.set_trace()
 
-    def _make_layer(self, block, planes, blocks, stride=1, dilate=False):
-        norm_layer = self._norm_layer
+    def _make_layer(self, block, planes, blocks, stride=1):
+        # norm_layer = self._norm_layer
         downsample = None
             
-        if stride != 1 or self.inplanes != planes * block.expansion:
+        if stride != 1 or planes * block.expansion != 64:
             downsample = nn.Sequential(
                 conv1x1(self.inplanes, planes * block.expansion, stride),
-                norm_layer(planes * block.expansion),
+                nn.BatchNorm2d(planes * block.expansion),
             )
 
         layers = []
-        layers.append(
-            block(
-                self.inplanes, planes, stride, downsample, 
-                self.groups, self.base_width, 1, norm_layer
-            )
-        )
+        # layers.append(block(self.inplanes, planes, stride, downsample, norm_layer))
+        layers.append(block(self.inplanes, planes, stride, downsample))
         self.inplanes = planes * block.expansion
         for _ in range(1, blocks):
-            layers.append(
-                block(self.inplanes, planes,
-                    groups=self.groups,
-                    base_width=self.base_width,
-                    dilation=1,
-                    norm_layer=norm_layer,
-                )
-            )
+            # layers.append(block(self.inplanes, planes, norm_layer=norm_layer))
+            layers.append(block(self.inplanes, planes))
 
         return nn.Sequential(*layers)
 
