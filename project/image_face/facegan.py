@@ -138,6 +138,9 @@ class MultiheadAttention(nn.Module):
 class VectorQuantizer(nn.Module):
     def __init__(self, codebook_size, emb_dim, beta):
         super().__init__()
+        # codebook_size = 1024
+        # emb_dim = 256
+        # beta = 0.25
         self.codebook_size = codebook_size  # number of embeddings
         self.embedding = nn.Embedding(self.codebook_size, emb_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.codebook_size, 1.0 / self.codebook_size)
@@ -148,11 +151,12 @@ class VectorQuantizer(nn.Module):
 
     def get_codebook_feat(self, indices, shape: List[int]):
         # input indices: batch*token_num -> (batch*token_num)*1
-        b, c, n = indices.size()
-        indices = indices.view(b * c * n, 1)
+        b, c, n = indices.size() # (1, 256, 1)
+        indices = indices.view(b * c * n, 1) # [256, 1]
         min_encodings = torch.zeros(b * c * n, self.codebook_size).to(indices)
 
         min_encodings.scatter_(1, indices, 1)
+        # tensor [min_encodings] size: [256, 1024], min: 0.0, max: 1.0, mean: 0.000977
 
         # get quantized latent vectors
         z_q = torch.matmul(min_encodings.to(self.embedding.weight.dtype), self.embedding.weight)
@@ -252,6 +256,14 @@ class AttnBlock(nn.Module):
 class Encoder(nn.Module):
     def __init__(self, in_channels, nf, emb_dim, ch_mult, num_res_blocks, resolution, attn_resolutions):
         super().__init__()
+        # in_channels = 3
+        # nf = 64
+        # emb_dim = 256
+        # ch_mult = [1, 2, 2, 4, 4, 8]
+        # num_res_blocks = 2
+        # resolution = 512
+        # attn_resolutions = [16]
+
         # self.nf = nf
         self.num_resolutions = len(ch_mult)
         curr_res = resolution
@@ -284,6 +296,7 @@ class Encoder(nn.Module):
         blocks.append(normalize(block_in_ch))
         blocks.append(nn.Conv2d(block_in_ch, emb_dim, kernel_size=3, stride=1, padding=1))
         self.blocks = nn.ModuleList(blocks)
+        # pdb.set_trace()
 
     def forward(self, x):
         for block in self.blocks:
@@ -295,7 +308,14 @@ class Encoder(nn.Module):
 class Generator(nn.Module):
     def __init__(self, nf, emb_dim, ch_mult, res_blocks, img_size, attn_resolutions):
         super().__init__()
-        self.num_resolutions = len(ch_mult)
+        # nf = 64
+        # emb_dim = 256
+        # ch_mult = [1, 2, 2, 4, 4, 8]
+        # res_blocks = 2
+        # img_size = 512
+        # attn_resolutions = [16]
+
+        self.num_resolutions = len(ch_mult) # 6 
         block_in_ch = nf * ch_mult[-1]
         curr_res = img_size // 2 ** (self.num_resolutions - 1)
 
@@ -308,10 +328,10 @@ class Generator(nn.Module):
         blocks.append(AttnBlock(block_in_ch))
         blocks.append(ResBlock(block_in_ch, block_in_ch))
 
-        for i in reversed(range(self.num_resolutions)):
+        for i in reversed(range(self.num_resolutions)): # 6
             block_out_ch = nf * ch_mult[i]
 
-            for _ in range(res_blocks):
+            for _ in range(res_blocks): # 2
                 blocks.append(ResBlock(block_in_ch, block_out_ch))
                 block_in_ch = block_out_ch
 
@@ -326,6 +346,7 @@ class Generator(nn.Module):
         blocks.append(nn.Conv2d(block_in_ch, out_channels=3, kernel_size=3, stride=1, padding=1))
 
         self.blocks = nn.ModuleList(blocks)
+
 
     def forward(self, x):
         for block in self.blocks:
