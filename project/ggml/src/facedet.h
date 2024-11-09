@@ -3,6 +3,8 @@
 #include "ggml_engine.h"
 #include "ggml_nn.h"
 
+#include <vector>
+
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 
 /*
@@ -12,8 +14,8 @@
 
 struct LandmarkHead {
     // network hparams
-    int in_channels == 256;
-    int num_anchors == 2
+    int in_channels = 256;
+    int num_anchors = 2;
 
     // network params
     struct Conv2d conv1x1;
@@ -30,10 +32,10 @@ struct LandmarkHead {
         char s[GGML_MAX_NAME];
 
         snprintf(s, sizeof(s), "%s%s", prefix, "conv1x1.");
-        conv_layer.setup_weight_names(s);
+        conv1x1.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = conv1x1.forward(ctx, x);
         x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [63, 44, 20, 1] --> [20, 63, 44, 1]
         int64_t n12 = x->ne[1]*x->ne[2];
@@ -49,8 +51,8 @@ struct LandmarkHead {
 
 struct BboxHead {
     // network hparams
-    int in_channels == 256;
-    int num_anchors == 2
+    int in_channels = 256;
+    int num_anchors = 2;
 
     // network params
     struct Conv2d conv1x1;
@@ -67,10 +69,10 @@ struct BboxHead {
         char s[GGML_MAX_NAME];
 
         snprintf(s, sizeof(s), "%s%s", prefix, "conv1x1.");
-        conv_layer.setup_weight_names(s);
+        conv1x1.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = conv1x1.forward(ctx, x);
         x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [63, 44, 8, 1] --> [8, 63, 44, 1]
         int64_t n12 = x->ne[1]*x->ne[2];
@@ -85,8 +87,8 @@ struct BboxHead {
 ) */
 struct ClassHead {
     // network hparams
-    int in_channels == 256;
-    int num_anchors == 2
+    int in_channels = 256;
+    int num_anchors = 2;
 
     // network params
     struct Conv2d conv1x1;
@@ -103,10 +105,10 @@ struct ClassHead {
         char s[GGML_MAX_NAME];
 
         snprintf(s, sizeof(s), "%s%s", prefix, "conv1x1.");
-        conv_layer.setup_weight_names(s);
+        conv1x1.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = conv1x1.forward(ctx, x);
         x = ggml_cont(ctx, ggml_permute(ctx, x, 1, 2, 0, 3)); // [63, 44, 4, 1] --> [4, 63, 44, 1]
         int64_t n12 = x->ne[1]*x->ne[2];
@@ -138,10 +140,10 @@ struct SshLayer {
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
  
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "0.");
         conv.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "1.");
         bn.setup_weight_names(s);
     }
 
@@ -162,7 +164,6 @@ struct SSH {
     struct SshLayer conv5X5_2;
     struct SshLayer conv7X7_2;
     struct SshLayer conv7X7_3;
-
 
     void create_weight_tensors(struct ggml_context* ctx) {
         conv3X3.in_channels = 256;
@@ -201,14 +202,14 @@ struct SSH {
         snprintf(s, sizeof(s), "%s%s", prefix, "conv7X7_2.");
         conv7X7_2.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv7X7_3.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "conv7x7_3.");
         conv7X7_3.setup_weight_names(s);
     }
 
-    // GGML_API struct ggml_tensor * ggml_leaky_relu(
+    // GGML_API ggml_tensor_t * ggml_leaky_relu(
     //         struct ggml_context * ctx,
-    //         struct ggml_tensor  * a, float negative_slope, bool inplace);
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
+    //         ggml_tensor_t  * a, float negative_slope, bool inplace);
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = conv3X3.forward(ctx, x);
 
         x = conv5X5_1.forward(ctx, x);
@@ -223,11 +224,10 @@ struct SSH {
     }
 };
 
-
-
 struct FpnLayer {
     int in_channels = 256;
     int out_channels = 256;
+    int kernel_size = 1;
 
     struct Conv2d conv;
     struct BatchNorm2d bn;
@@ -235,7 +235,7 @@ struct FpnLayer {
     void create_weight_tensors(struct ggml_context* ctx) {
         conv.in_channels = in_channels;
         conv.out_channels = out_channels;
-        conv.kernel_size = { 1, 1 };
+        conv.kernel_size = { kernel_size, kernel_size };
         conv.stride = { 1, 1 };
         conv.has_bias = false;
         conv.create_weight_tensors(ctx);
@@ -247,10 +247,10 @@ struct FpnLayer {
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
  
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "0.");
         conv.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "1.");
         bn.setup_weight_names(s);
     }
 
@@ -261,6 +261,7 @@ struct FpnLayer {
         return x;
     }
 };
+
 
 struct FPN {
     // network hparams
@@ -290,14 +291,16 @@ struct FPN {
 
         merge1.in_channels = 256;
         merge1.out_channels = 256;
+        merge1.kernel_size = 3;
         merge1.create_weight_tensors(ctx);
 
         merge2.in_channels = 256;
         merge2.out_channels = 256;
+        merge2.kernel_size = 3;
         merge2.create_weight_tensors(ctx);
     }
 
-    void setup_weight_names(char *prefix) {
+    void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
  
         snprintf(s, sizeof(s), "%s%s", prefix, "output1.");
@@ -316,13 +319,56 @@ struct FPN {
         merge2.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
-    	// please implement forward by your self, please !!!
-        x = output1.forward(ctx, x);
-        x = ggml_leaky_relu(ctx, x, 0.0, true /*inplace*/);
+    // # todos.debug.output_var("FPN input", input)
+    // # FPN input is list: len = 3
+    // #     tensor [item] size: [1, 512, 44, 63], min: 0.0, max: 2.788131, mean: 0.08262
+    // #     tensor [item] size: [1, 1024, 22, 32], min: 0.0, max: 2.534333, mean: 0.033747
+    // #     tensor [item] size: [1, 2048, 11, 16], min: 0.0, max: 6.305652, mean: 0.326206
+    // output1 = self.output1(input[0])
+    // output2 = self.output2(input[1])
+    // output3 = self.output3(input[2])
+
+    // # Update output2
+    // up3 = F.interpolate(output3, size=[output2.size(2), output2.size(3)], mode="nearest")
+    // output2 = output2 + up3
+    // output2 = self.merge2(output2)
+
+    // # Update output1
+    // up2 = F.interpolate(output2, size=[output1.size(2), output1.size(3)], mode="nearest")
+    // output1 = output1 + up2
+    // output1 = self.merge1(output1)
+
+    // out = [output1, output2, output3]
+    // # todos.debug.output_var("FPN output", out)
+    // # FPN output is list: len = 3
+    // #     tensor [item] size: [1, 256, 44, 63], min: -0.0, max: 6.100448, mean: 0.307941
+    // #     tensor [item] size: [1, 256, 22, 32], min: -0.0, max: 8.648984, mean: 0.271562
+    // #     tensor [item] size: [1, 256, 11, 16], min: -0.0, max: 8.366714, mean: 0.319153
+    // return out
 
 
-    	return x;
+    std::vector<ggml_tensor_t*> forward(struct ggml_context* ctx, ggml_tensor_t* x1, ggml_tensor_t* x2, ggml_tensor_t* x3) {
+        std::vector<ggml_tensor_t*> fpn_out;
+
+        ggml_tensor_t *y1 = output1.forward(ctx, x1);
+        ggml_tensor_t *y2 = output2.forward(ctx, x2);
+        ggml_tensor_t *y3 = output3.forward(ctx, x3);
+
+        // Update y2
+        ggml_tensor_t *up3 = ggml_upscale_ext(ctx, y3, y2->ne[0], y2->ne[1], y3->ne[2], y3->ne[4]); // W, H, C, B
+        y2 = ggml_add(ctx, y2, up3);
+        y2 = merge2.forward(ctx, y2);
+
+        // Update y1
+        ggml_tensor_t *up2 = ggml_upscale_ext(ctx, y2, y1->ne[0], y1->ne[1], y2->ne[2], y2->ne[4]); // W, H, C, B
+        y1 = ggml_add(ctx, y1, up2);
+        y1 = merge1.forward(ctx, y1);
+
+        fpn_out.push_back(y1);
+        fpn_out.push_back(y2);
+        fpn_out.push_back(y3);
+
+    	return fpn_out;
     }
 };
 
@@ -336,6 +382,50 @@ struct FPN {
   (bn3): BatchNorm2d(2048, eps=1e-05, momentum=0.1, affine=True, track_running_stats=True)
   (relu): ReLU(inplace=True)
 ) */
+
+// downsample = nn.Sequential(
+//     conv1x1(in_planes, out_planes * block.expansion, stride),
+//     nn.BatchNorm2d(out_planes * block.expansion),
+// )
+
+struct BottleneckDownsample {
+    int in_planes;
+    int out_planes;
+    int stride;
+
+    struct Conv2d conv;
+    struct BatchNorm2d bn;
+
+    void create_weight_tensors(struct ggml_context* ctx) {
+        conv.in_channels = in_planes;
+        conv.out_channels = out_planes * 4;
+        conv.kernel_size = { 1, 1 };
+        conv.stride = { stride, stride };
+        conv.has_bias = false;
+        conv.create_weight_tensors(ctx);
+
+        bn.num_features = out_planes * 4;
+        bn.create_weight_tensors(ctx);
+    }
+
+    void setup_weight_names(const char *prefix) {
+        char s[GGML_MAX_NAME];
+ 
+        snprintf(s, sizeof(s), "%s%s", prefix, "0.");
+        conv.setup_weight_names(s);
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "1.");
+        bn.setup_weight_names(s);
+    }
+
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        x = conv.forward(ctx, x);
+        x = bn.forward(ctx, x);
+
+        return x;
+    }
+};
+
 
 struct Bottleneck {
     // network hparams
@@ -402,59 +492,34 @@ struct Bottleneck {
         bn3.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
-    	// please implement forward by your self, please !!!
+    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x, struct BottleneckDownsample *down) {
+        ggml_tensor_t *id;
+        if (down) {
+            id = down->forward(ctx, x);
+        } else {
+            id = x;
+        }
 
+        x = conv1.forward(ctx, x);
+        x = bn1.forward(ctx, x);
+        x = ggml_relu(ctx, x);
+
+        x = conv2.forward(ctx, x);
+        x = bn2.forward(ctx, x);
+        x = ggml_relu(ctx, x);
+
+        x = conv3.forward(ctx, x);
+        x = bn3.forward(ctx, x);
+
+        x = ggml_add(ctx, x, id);
+        x = ggml_relu_inplace(ctx, x);
     	return x;
-    }
-};
-
-// downsample = nn.Sequential(
-//     conv1x1(self.in_planes, out_planes * block.expansion, stride),
-//     nn.BatchNorm2d(out_planes * block.expansion),
-// )
-
-struct BottleneckDownsample {
-    int in_planes;
-    int out_planes;
-    int stride;
-
-    struct Conv2d conv;
-    struct BatchNorm2d bn;
-
-    void create_weight_tensors(struct ggml_context* ctx) {
-        conv.in_channels = in_planes;
-        conv.out_channels = out_planes * 4;
-        conv.kernel_size = { 1, 1 };
-        conv.stride = { stride, stride };
-        conv.has_bias = false;
-        conv.create_weight_tensors(ctx);
-
-        bn.num_features = out_planes * 4;
-        bn.create_weight_tensors(ctx);
-    }
-
-    void setup_weight_names(const char *prefix) {
-        char s[GGML_MAX_NAME];
- 
-        snprintf(s, sizeof(s), "%s%s", prefix, "conv.");
-        conv.setup_weight_names(s);
-
-        snprintf(s, sizeof(s), "%s%s", prefix, "bn.");
-        bn.setup_weight_names(s);
-    }
-
-    ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        x = conv.forward(ctx, x);
-        x = bn.forward(ctx, x);
-
-        return x;
     }
 };
 
 struct ResNet3Layers {
     // network hparams
-    int in_planes = 2048;
+    // int in_planes = 2048;
 
     // network params
 
@@ -498,6 +563,12 @@ struct ResNet3Layers {
 
         bn1.num_features = 64;
         bn1.create_weight_tensors(ctx);
+
+        // maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        maxpool.kernel_size = 3;
+        maxpool.stride = 2;
+        maxpool.padding = 1;
+        maxpool.create_weight_tensors(ctx);
 
         // layer1
         layer1_0.in_planes = 64;
@@ -604,7 +675,7 @@ struct ResNet3Layers {
         layer4_2.create_weight_tensors(ctx);
     }
 
-    void setup_weight_names(char *prefix) {
+    void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
  
         snprintf(s, sizeof(s), "%s%s", prefix, "conv1.");
@@ -657,16 +728,55 @@ struct ResNet3Layers {
         layer4_2.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
-    	// please implement forward by your self, please !!!
+    std::vector<ggml_tensor_t*> forward(struct ggml_context* ctx, ggml_tensor_t* x) {
+        // x = self.conv1(x)
+        // x = self.bn1(x)
+        // x = self.relu(x)
+        // x = self.maxpool(x)
+        // x1 = self.layer1(x)
+        // x2 = self.layer2(x1)
+        // x3 = self.layer3(x2)
+        // x4 = self.layer4(x3)
+        std::vector<ggml_tensor_t*> resnet3_out;
 
+        x = conv1.forward(ctx, x);
+        x = bn1.forward(ctx, x);
+        x = ggml_relu_inplace(ctx, x);
+        x = maxpool.forward(ctx, x);
 
-    	return x;
+        // layer1
+        x = layer1_0.forward(ctx, x, &layer1_0_downsample);
+        x = layer1_1.forward(ctx, x, NULL);
+        ggml_tensor_t *x1 = layer1_2.forward(ctx, x, NULL);
+
+        // layer2
+        x1 = layer2_0.forward(ctx, x1, &layer2_0_downsample);
+        x1 = layer2_1.forward(ctx, x1, NULL);
+        x1 = layer2_2.forward(ctx, x1, NULL);
+        ggml_tensor_t *x2 = layer2_3.forward(ctx, x1, NULL);
+
+        // layer3
+        x2 = layer3_0.forward(ctx, x2, &layer3_0_downsample);
+        x2 = layer3_1.forward(ctx, x2, NULL);
+        x2 = layer3_2.forward(ctx, x2, NULL);
+        x2 = layer3_3.forward(ctx, x2, NULL);
+        x2 = layer3_4.forward(ctx, x2, NULL);
+        ggml_tensor_t *x3 = layer3_5.forward(ctx, x2, NULL);
+
+        // layer4
+        x3 = layer4_0.forward(ctx, x3, &layer4_0_downsample);
+        x3 = layer4_1.forward(ctx, x3, NULL);
+        ggml_tensor_t *x4 = layer4_2.forward(ctx, x3, NULL);
+
+        resnet3_out.push_back(x2);
+        resnet3_out.push_back(x3);
+        resnet3_out.push_back(x4);
+
+    	return resnet3_out;
     }
 };
 
-
-struct RetinaFace {
+struct RetinaFace : GGMLNetwork {
     // network params
     struct ResNet3Layers body;
 
@@ -711,44 +821,106 @@ struct RetinaFace {
         LandmarkHead_2.create_weight_tensors(ctx);
     }
 
-    void setup_weight_names(char *prefix) {
+    void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
  
-        snprintf(s, sizeof(s), "%s%s", prefix, "body.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.body.");
         body.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "ssh1.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.fpn.");
+        fpn.setup_weight_names(s);
+
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ssh1.");
         ssh1.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "ssh2.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ssh2.");
         ssh2.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "ssh3.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ssh3.");
         ssh3.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "ClassHead.0.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ClassHead.0.");
         ClassHead_0.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "ClassHead.1.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ClassHead.1.");
         ClassHead_1.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "ClassHead.2.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.ClassHead.2.");
         ClassHead_2.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "BboxHead.0.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.BboxHead.0.");
         BboxHead_0.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "BboxHead.1.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.BboxHead.1.");
         BboxHead_1.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "BboxHead.2.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.BboxHead.2.");
         BboxHead_2.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "LandmarkHead.0.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.LandmarkHead.0.");
         LandmarkHead_0.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "LandmarkHead.1.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.LandmarkHead.1.");
         LandmarkHead_1.setup_weight_names(s);
-        snprintf(s, sizeof(s), "%s%s", prefix, "LandmarkHead.2.");
+        snprintf(s, sizeof(s), "%s%s", prefix, "module.LandmarkHead.2.");
         LandmarkHead_2.setup_weight_names(s);
     }
 
-    struct ggml_tensor* forward(struct ggml_context* ctx, struct ggml_tensor* x) {
+    ggml_tensor_t* forward(struct ggml_context* ctx, int argc, ggml_tensor_t* argv[]) {
+        GGML_UNUSED(argc);
 
-    	return x;
+        ggml_tensor_t *x = argv[0];
+
+        ggml_tensor_dump("x", x);
+
+        std::vector<ggml_tensor_t *> resnet3_out = body.forward(ctx, x); // x -- bgr image
+        ggml_tensor_t* x1 = resnet3_out[0];
+        ggml_tensor_t* x2 = resnet3_out[1];
+        ggml_tensor_t* x3 = resnet3_out[2];
+
+        ggml_tensor_dump("x1", x1);
+        ggml_tensor_dump("x2", x2);
+        ggml_tensor_dump("x3", x3);
+
+        // # tensor [bgr_image] size: [1, 3, 351, 500], min: -108.986504, max: 126.011002, mean: -26.315453
+        // # out is list: len = 3
+        // #     tensor [item] size: [1, 512, 44, 63], min: 0.0, max: 2.788131, mean: 0.08262
+        // #     tensor [item] size: [1, 1024, 22, 32], min: 0.0, max: 2.534333, mean: 0.033747
+        // #     tensor [item] size: [1, 2048, 11, 16], min: 0.0, max: 6.305652, mean: 0.326206
+
+
+        std::vector<ggml_tensor_t *> fpn_out = fpn.forward(ctx, x1, x2, x3);
+        ggml_tensor_t *f0 = ssh1.forward(ctx, fpn_out[0]);
+        ggml_tensor_t *f1 = ssh2.forward(ctx, fpn_out[1]);
+        ggml_tensor_t *f2 = ssh3.forward(ctx, fpn_out[2]);
+
+        ggml_tensor_dump("f0", f0);
+        ggml_tensor_dump("f1", f1);
+        ggml_tensor_dump("f2", f2);
+
+        // BBox regressions ...
+        ggml_tensor_t *box0 = BboxHead_0.forward(ctx, f0);
+        ggml_tensor_t *box1 = BboxHead_1.forward(ctx, f1);
+        ggml_tensor_t *box2 = BboxHead_2.forward(ctx, f2);
+        ggml_tensor_t *bbox_regressions = ggml_concat(ctx, box0, box1, 1/*dim*/);
+        bbox_regressions = ggml_concat(ctx, bbox_regressions, box2, 1/*dim*/);
+        ggml_tensor_dump("bbox_regressions", bbox_regressions);
+
+        // Score regressions ...
+        ggml_tensor_t *score0 = ClassHead_0.forward(ctx, f0);
+        ggml_tensor_t *score1 = ClassHead_1.forward(ctx, f1);
+        ggml_tensor_t *score2 = ClassHead_2.forward(ctx, f2);
+        ggml_tensor_t *score_regressions = ggml_concat(ctx, score0, score1, 1/*dim*/);
+        score_regressions = ggml_concat(ctx, score_regressions, score2, 1/*dim*/);
+        score_regressions = ggml_soft_max(ctx, score_regressions);
+        ggml_tensor_dump("score_regressions", score_regressions);
+
+        // Landmark regressions ...
+        ggml_tensor_t *ldm0 = LandmarkHead_0.forward(ctx, f0);
+        ggml_tensor_t *ldm1 = LandmarkHead_1.forward(ctx, f1);
+        ggml_tensor_t *ldm2 = LandmarkHead_2.forward(ctx, f2);
+        ggml_tensor_t *ldm_regressions = ggml_concat(ctx, ldm0, ldm1, 1/*dim*/);
+        ldm_regressions = ggml_concat(ctx, ldm_regressions, ldm2, 1/*dim*/);
+        ggml_tensor_dump("ldm_regressions", ldm_regressions);
+
+        ggml_tensor_t *conf_loc_landmarks = ggml_concat(ctx, score_regressions, bbox_regressions, 1/*dim*/);
+        conf_loc_landmarks = ggml_concat(ctx, conf_loc_landmarks, ldm_regressions, 1/*dim*/);
+        ggml_tensor_dump("conf_loc_landmarks", conf_loc_landmarks);
+
+    	return conf_loc_landmarks;
     }
 };
 

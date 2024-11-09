@@ -26,17 +26,17 @@ int image_face_client(RetinaFace *net, char *input_filename, char *output_filena
     TENSOR *argv[1];
 
     printf("Face %s to %s ...\n", input_filename, output_filename);
-    TENSOR *input_tensor = tensor_load_image(input_filename, 1 /*alpha*/);
+    TENSOR *input_tensor = tensor_load_image(input_filename, 0 /*alpha*/);
     check_tensor(input_tensor);
 
-    // self.MAX_H = 2048
-    // self.MAX_W = 4096
-    // self.MAX_TIMES = 32
-    const int MAX_TIMES = 32;
-    int H = input_tensor->height;
-    int W = input_tensor->width;
-    int pad_h = (MAX_TIMES - (H % MAX_TIMES)) % MAX_TIMES;
-    int pad_w = (MAX_TIMES - (W % MAX_TIMES)) % MAX_TIMES;
+    // // self.MAX_H = 2048
+    // // self.MAX_W = 4096
+    // // self.MAX_TIMES = 32
+    // const int MAX_TIMES = 32;
+    // int H = input_tensor->height;
+    // int W = input_tensor->width;
+    // int pad_h = (MAX_TIMES - (H % MAX_TIMES)) % MAX_TIMES;
+    // int pad_w = (MAX_TIMES - (W % MAX_TIMES)) % MAX_TIMES;
 
     argv[0] = input_tensor ;
     TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
@@ -47,9 +47,11 @@ int image_face_client(RetinaFace *net, char *input_filename, char *output_filena
     //     tensor_destroy(xxxx_test);
     // }
     if (tensor_valid(output_tensor)) {
-        if (tensor_zeropad_(output_tensor, H, W) == RET_OK) {
-            tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
-        }
+        // if (tensor_zeropad_(output_tensor, H, W) == RET_OK) {
+        //     tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
+        // }
+        tensor_show("output_tensor", output_tensor);
+
         tensor_destroy(output_tensor);
     }
     tensor_destroy(input_tensor);
@@ -113,12 +115,13 @@ int main(int argc, char** argv)
     // load net weight ...
     GGMLModel model;
     {
-        check_point(model.preload("models/image_facedet.gguf") == RET_OK);
+        check_point(model.preload("models/image_facedet_f32.gguf") == RET_OK);
+        // model.remap("module.", "");
 
         // -----------------------------------------------------------------------------------------
         net.set_device(device_no);
         net.start_engine();
-        // net.dump();
+        net.dump();
     }
 
     for (int i = optind; i < argc; i++) {

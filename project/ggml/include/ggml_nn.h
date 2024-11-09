@@ -291,6 +291,30 @@ struct GroupNorm {
     }
 };
 
+struct MaxPool2d {
+    int kernel_size = 3;
+    int stride = 2;
+    int padding = 1;
+
+    void create_weight_tensors(ggml_context_t* ctx)
+    {
+        GGML_UNUSED(ctx);
+    }
+
+    void setup_weight_names(const char* prefix)
+    {
+        GGML_UNUSED(prefix);
+    }
+
+    ggml_tensor_t* forward(ggml_context_t* ctx, ggml_tensor_t* x)
+    {
+        return ggml_pool_2d(ctx, x, GGML_OP_POOL_MAX, \
+            kernel_size, kernel_size, stride, stride, (float)padding, (float)padding);
+    }
+};
+
+
+
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // class torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=0.0, bias=True, 
 //      add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None, batch_first=False, device=None, dtype=None)[source]
