@@ -11,6 +11,8 @@
  LandmarkHead(
   (conv1x1): Conv2d(256, 20, kernel_size=(1, 1), stride=(1, 1))
 ) */
+// ggml_set_name(out, "xxxx_test");
+// ggml_set_output(out);
 
 struct LandmarkHead {
     // network hparams
@@ -206,21 +208,38 @@ struct SSH {
         conv7X7_3.setup_weight_names(s);
     }
 
-    // GGML_API ggml_tensor_t * ggml_leaky_relu(
-    //         struct ggml_context * ctx,
-    //         ggml_tensor_t  * a, float negative_slope, bool inplace);
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
-        x = conv3X3.forward(ctx, x);
+        // conv3X3 = self.conv3X3(input)
+
+        // conv5X5_1 = self.conv5X5_1(input)
+        // conv5X5 = self.conv5X5_2(conv5X5_1)
+
+        // conv7X7_2 = self.conv7X7_2(conv5X5_1)
+        // conv7X7 = self.conv7x7_3(conv7X7_2)
+
+        // out = torch.cat([conv3X3, conv5X5, conv7X7], dim=1)
+        // out = F.relu(out)
+
+        ggml_tensor_t *conv3 = conv3X3.forward(ctx, x);
+        ggml_tensor_dump("conv3", conv3);
 
         x = conv5X5_1.forward(ctx, x);
-        x = ggml_leaky_relu(ctx, x, 0.0, true /*inplace*/);
-        x = conv5X5_2.forward(ctx, x);
+        ggml_tensor_t *conv5X5_1 = ggml_leaky_relu(ctx, x, 0.0, true /*inplace*/);
+        ggml_tensor_t *conv5 = conv5X5_2.forward(ctx, conv5X5_1);
+        ggml_tensor_dump("conv5", conv5);
         
-        x = conv7X7_2.forward(ctx, x);
-        x = ggml_leaky_relu(ctx, x, 0.0, true /*inplace*/);
-        x = conv7X7_3.forward(ctx, x);
+        conv5X5_1 = conv7X7_2.forward(ctx, conv5X5_1);
+        ggml_tensor_t *conv7X7_2 = ggml_leaky_relu(ctx, conv5X5_1, 0.0, true /*inplace*/);
+        ggml_tensor_t *conv7 = conv7X7_3.forward(ctx, conv7X7_2);
+        ggml_tensor_dump("conv7", conv7);
 
-    	return x;
+        // conv3    f32 [63, 44, 128, 1],  (reshaped) (permuted) (cont) (view) (view) (view) (view)
+        // conv5    f32 [63, 44, 64, 1],  (reshaped) (permuted) (cont) (view) (view) (view) (view)
+        // conv7    f32 [63, 44, 64, 1],  (reshaped) (permuted) (cont) (view) (view) (view) (view)
+
+        ggml_tensor_t *out = ggml_concat(ctx, conv3, conv5, 2/*dim*/);
+        out = ggml_concat(ctx, out, conv7, 2/*dim*/);
+    	return ggml_relu(ctx, out);
     }
 };
 
@@ -228,6 +247,7 @@ struct FpnLayer {
     int in_channels = 256;
     int out_channels = 256;
     int kernel_size = 1;
+    int padding_size = 0;
 
     struct Conv2d conv;
     struct BatchNorm2d bn;
@@ -236,6 +256,7 @@ struct FpnLayer {
         conv.in_channels = in_channels;
         conv.out_channels = out_channels;
         conv.kernel_size = { kernel_size, kernel_size };
+        conv.padding = { padding_size, padding_size };
         conv.stride = { 1, 1 };
         conv.has_bias = false;
         conv.create_weight_tensors(ctx);
@@ -254,9 +275,14 @@ struct FpnLayer {
         bn.setup_weight_names(s);
     }
 
+        // nn.Conv2d(inp, oup, 1, stride, padding=0, bias=False),
+        // nn.BatchNorm2d(oup),
+        // nn.LeakyReLU(negative_slope=leaky, inplace=True),
+
     ggml_tensor_t* forward(struct ggml_context* ctx, ggml_tensor_t* x) {
         x = conv.forward(ctx, x);
         x = bn.forward(ctx, x);
+        x = ggml_leaky_relu(ctx, x, 0.0, true);
 
         return x;
     }
@@ -292,11 +318,13 @@ struct FPN {
         merge1.in_channels = 256;
         merge1.out_channels = 256;
         merge1.kernel_size = 3;
+        merge1.padding_size = 1;
         merge1.create_weight_tensors(ctx);
 
         merge2.in_channels = 256;
         merge2.out_channels = 256;
         merge2.kernel_size = 3;
+        merge2.padding_size = 1;
         merge2.create_weight_tensors(ctx);
     }
 
@@ -351,18 +379,26 @@ struct FPN {
         std::vector<ggml_tensor_t*> fpn_out;
 
         ggml_tensor_t *y1 = output1.forward(ctx, x1);
+        ggml_tensor_dump("y1", y1);
         ggml_tensor_t *y2 = output2.forward(ctx, x2);
+        ggml_tensor_dump("y2", y2);
         ggml_tensor_t *y3 = output3.forward(ctx, x3);
+        ggml_tensor_dump("y3", y3);
 
         // Update y2
-        ggml_tensor_t *up3 = ggml_upscale_ext(ctx, y3, y2->ne[0], y2->ne[1], y3->ne[2], y3->ne[4]); // W, H, C, B
+        ggml_tensor_t *up3 = ggml_upscale_ext(ctx, y3, y2->ne[0], y2->ne[1], y3->ne[2], y3->ne[3]); // W, H, C, B
+        ggml_tensor_dump("up3", up3);
+
         y2 = ggml_add(ctx, y2, up3);
         y2 = merge2.forward(ctx, y2);
 
         // Update y1
-        ggml_tensor_t *up2 = ggml_upscale_ext(ctx, y2, y1->ne[0], y1->ne[1], y2->ne[2], y2->ne[4]); // W, H, C, B
+        ggml_tensor_t *up2 = ggml_upscale_ext(ctx, y2, y1->ne[0], y1->ne[1], y2->ne[2], y2->ne[3]); // W, H, C, B
+        ggml_tensor_dump("up2", up2);
+
         y1 = ggml_add(ctx, y1, up2);
         y1 = merge1.forward(ctx, y1);
+
 
         fpn_out.push_back(y1);
         fpn_out.push_back(y2);
@@ -743,6 +779,8 @@ struct ResNet3Layers {
         x = bn1.forward(ctx, x);
         x = ggml_relu_inplace(ctx, x);
         x = maxpool.forward(ctx, x);
+        ggml_set_name(x, "r1");
+        ggml_set_output(x);
 
         // layer1
         x = layer1_0.forward(ctx, x, &layer1_0_downsample);
@@ -754,6 +792,11 @@ struct ResNet3Layers {
         x1 = layer2_1.forward(ctx, x1, NULL);
         x1 = layer2_2.forward(ctx, x1, NULL);
         ggml_tensor_t *x2 = layer2_3.forward(ctx, x1, NULL);
+        ggml_set_name(x2, "r2");
+        ggml_set_output(x2);
+
+        resnet3_out.push_back(x2);
+
 
         // layer3
         x2 = layer3_0.forward(ctx, x2, &layer3_0_downsample);
@@ -761,16 +804,23 @@ struct ResNet3Layers {
         x2 = layer3_2.forward(ctx, x2, NULL);
         x2 = layer3_3.forward(ctx, x2, NULL);
         x2 = layer3_4.forward(ctx, x2, NULL);
+
         ggml_tensor_t *x3 = layer3_5.forward(ctx, x2, NULL);
+        ggml_set_name(x3, "r3");
+        ggml_set_output(x3);
+
+        resnet3_out.push_back(x3);
+
 
         // layer4
         x3 = layer4_0.forward(ctx, x3, &layer4_0_downsample);
         x3 = layer4_1.forward(ctx, x3, NULL);
         ggml_tensor_t *x4 = layer4_2.forward(ctx, x3, NULL);
+        ggml_set_name(x4, "r4");
+        ggml_set_output(x4);
 
-        resnet3_out.push_back(x2);
-        resnet3_out.push_back(x3);
         resnet3_out.push_back(x4);
+
 
     	return resnet3_out;
     }
@@ -864,16 +914,20 @@ struct RetinaFace : GGMLNetwork {
 
         ggml_tensor_t *x = argv[0];
 
-        ggml_tensor_dump("x", x);
-
+        // # tensor [x] size: [1, 3, 351, 500], min: -108.986504, max: 126.011002, mean: -26.315453
         std::vector<ggml_tensor_t *> resnet3_out = body.forward(ctx, x); // x -- bgr image
         ggml_tensor_t* x1 = resnet3_out[0];
         ggml_tensor_t* x2 = resnet3_out[1];
         ggml_tensor_t* x3 = resnet3_out[2];
 
-        ggml_tensor_dump("x1", x1);
-        ggml_tensor_dump("x2", x2);
-        ggml_tensor_dump("x3", x3);
+        ggml_set_name(x1, "x1");
+        ggml_set_output(x1);
+
+        ggml_set_name(x2, "x2");
+        ggml_set_output(x2);
+
+        ggml_set_name(x3, "x3");
+        ggml_set_output(x3);
 
         // # tensor [bgr_image] size: [1, 3, 351, 500], min: -108.986504, max: 126.011002, mean: -26.315453
         // # out is list: len = 3
@@ -882,14 +936,33 @@ struct RetinaFace : GGMLNetwork {
         // #     tensor [item] size: [1, 2048, 11, 16], min: 0.0, max: 6.305652, mean: 0.326206
 
 
+
         std::vector<ggml_tensor_t *> fpn_out = fpn.forward(ctx, x1, x2, x3);
+        // # fpn is list: len = 3
+        // #     tensor [item] size: [1, 256, 44, 63], min: -0.0, max: 6.100448, mean: 0.307941
+        // #     tensor [item] size: [1, 256, 22, 32], min: -0.0, max: 8.648984, mean: 0.271562
+        // #     tensor [item] size: [1, 256, 11, 16], min: -0.0, max: 8.366714, mean: 0.319153
+
+        // ----------------------------------------------------
+
         ggml_tensor_t *f0 = ssh1.forward(ctx, fpn_out[0]);
         ggml_tensor_t *f1 = ssh2.forward(ctx, fpn_out[1]);
         ggml_tensor_t *f2 = ssh3.forward(ctx, fpn_out[2]);
 
-        ggml_tensor_dump("f0", f0);
-        ggml_tensor_dump("f1", f1);
-        ggml_tensor_dump("f2", f2);
+        ggml_set_name(f0, "f0");
+        ggml_set_output(f0);
+
+        ggml_set_name(f1, "f1");
+        ggml_set_output(f1);
+
+        ggml_set_name(f2, "f2");
+        ggml_set_output(f2);
+
+
+        // # tensor [feature1] size: [1, 256, 44, 63], min: 0.0, max: 5.633877, mean: 0.342905
+        // # tensor [feature2] size: [1, 256, 22, 32], min: 0.0, max: 5.345377, mean: 0.321881
+        // # tensor [feature3] size: [1, 256, 11, 16], min: 0.0, max: 3.646523, mean: 0.264832
+
 
         // BBox regressions ...
         ggml_tensor_t *box0 = BboxHead_0.forward(ctx, f0);
@@ -897,16 +970,22 @@ struct RetinaFace : GGMLNetwork {
         ggml_tensor_t *box2 = BboxHead_2.forward(ctx, f2);
         ggml_tensor_t *bbox_regressions = ggml_concat(ctx, box0, box1, 1/*dim*/);
         bbox_regressions = ggml_concat(ctx, bbox_regressions, box2, 1/*dim*/);
-        ggml_tensor_dump("bbox_regressions", bbox_regressions);
+        // # tensor [bbox_regressions] size: [1, 7304, 4], min: -4.950671, max: 5.339179, mean: -0.02128
+        ggml_set_name(bbox_regressions, "bbox_regressions");
+        ggml_set_output(bbox_regressions);
 
         // Score regressions ...
         ggml_tensor_t *score0 = ClassHead_0.forward(ctx, f0);
         ggml_tensor_t *score1 = ClassHead_1.forward(ctx, f1);
         ggml_tensor_t *score2 = ClassHead_2.forward(ctx, f2);
         ggml_tensor_t *score_regressions = ggml_concat(ctx, score0, score1, 1/*dim*/);
-        score_regressions = ggml_concat(ctx, score_regressions, score2, 1/*dim*/);
+        score_regressions = ggml_concat(ctx, score_regressions, score2, 1/*dim*/); // f32 [2, 7304, 1, 1]
+
         score_regressions = ggml_soft_max(ctx, score_regressions);
-        ggml_tensor_dump("score_regressions", score_regressions);
+        ggml_set_name(score_regressions, "score_regressions");
+        ggml_set_output(score_regressions);
+
+        // # tensor [classifications] size: [1, 7304, 2], min: -7.161493, max: 6.567798, mean: -0.06647
 
         // Landmark regressions ...
         ggml_tensor_t *ldm0 = LandmarkHead_0.forward(ctx, f0);
@@ -914,11 +993,25 @@ struct RetinaFace : GGMLNetwork {
         ggml_tensor_t *ldm2 = LandmarkHead_2.forward(ctx, f2);
         ggml_tensor_t *ldm_regressions = ggml_concat(ctx, ldm0, ldm1, 1/*dim*/);
         ldm_regressions = ggml_concat(ctx, ldm_regressions, ldm2, 1/*dim*/);
-        ggml_tensor_dump("ldm_regressions", ldm_regressions);
+        // # tensor [ldm_regressions] size: [1, 7304, 10], min: -10.258643, max: 11.092538, mean: 0.105917
+        ggml_set_name(ldm_regressions, "ldm_regressions");
+        ggml_set_output(ldm_regressions);
 
-        ggml_tensor_t *conf_loc_landmarks = ggml_concat(ctx, score_regressions, bbox_regressions, 1/*dim*/);
-        conf_loc_landmarks = ggml_concat(ctx, conf_loc_landmarks, ldm_regressions, 1/*dim*/);
-        ggml_tensor_dump("conf_loc_landmarks", conf_loc_landmarks);
+        // bbox_regressions    f32 [4, 7304, 1, 1], 
+        // score_regressions    f32 [2, 7304, 1, 1], 
+        // ldm_regressions    f32 [10, 7304, 1, 1], 
+
+        ggml_tensor_t *conf_loc_landmarks = ggml_concat(ctx, score_regressions, bbox_regressions, 0/*dim*/);
+        conf_loc_landmarks = ggml_concat(ctx, conf_loc_landmarks, ldm_regressions, 0/*dim*/);
+        // # tensor [conf_loc_landmarks] size: [7304, 16], min: -10.258643, max: 11.092538, mean: 0.123378
+        ggml_set_name(conf_loc_landmarks, "conf_loc_landmarks");
+        ggml_set_output(conf_loc_landmarks);
+
+        // Info: ********************** score_regressions Tensor: 1x1x7304x2
+        // min: 0.0000, max: 1.0000, mean: 0.5000
+
+        // Info: output_tensor Tensor: 1x1x7304x16
+        // min: -10.2714, max: 11.0866, mean: 0.1235
 
     	return conf_loc_landmarks;
     }

@@ -17,7 +17,9 @@ from typing import List
 from . import resnet
 
 import math
+import todos
 import pdb
+# from ggml_engine import create_network
 
 def load_facedet(model, path):
     """Load model."""
@@ -168,16 +170,14 @@ def conv_bn1x1(inp, oup, stride, leaky: float = 0.0):
 class SSH(nn.Module):
     def __init__(self, in_channel, out_channel):
         super().__init__()
-        assert out_channel % 4 == 0
-        leaky = 0.0
-        if out_channel <= 64:
-            leaky = 0.1
+        assert in_channel == 256 and out_channel == 256
+
         self.conv3X3 = conv_bn_no_relu(in_channel, out_channel // 2, stride=1)
 
-        self.conv5X5_1 = conv_bn(in_channel, out_channel // 4, stride=1, leaky=leaky)
+        self.conv5X5_1 = conv_bn(in_channel, out_channel // 4, stride=1, leaky=0.0)
         self.conv5X5_2 = conv_bn_no_relu(out_channel // 4, out_channel // 4, stride=1)
 
-        self.conv7X7_2 = conv_bn(out_channel // 4, out_channel // 4, stride=1, leaky=leaky)
+        self.conv7X7_2 = conv_bn(out_channel // 4, out_channel // 4, stride=1, leaky=0.0)
         self.conv7x7_3 = conv_bn_no_relu(out_channel // 4, out_channel // 4, stride=1)
 
     def forward(self, input):
@@ -197,89 +197,129 @@ class SSH(nn.Module):
 class FPN(nn.Module):
     def __init__(self, in_channels_list, out_channels):
         super().__init__()
-        # FPN:  [512, 1024, 2048] 256
-        leaky = 0.0
-        # if out_channels <= 64: # False
-        #     leaky = 0.1
-        self.output1 = conv_bn1x1(in_channels_list[0], out_channels, stride=1, leaky=leaky)
-        self.output2 = conv_bn1x1(in_channels_list[1], out_channels, stride=1, leaky=leaky)
-        self.output3 = conv_bn1x1(in_channels_list[2], out_channels, stride=1, leaky=leaky)
-
-        self.merge1 = conv_bn(out_channels, out_channels, leaky=leaky)
-        self.merge2 = conv_bn(out_channels, out_channels, leaky=leaky)
+        # in_channels_list:  [512, 1024, 2048]
+        # out_channels:  256
+        # leaky = 0.0
+        self.output1 = conv_bn1x1(in_channels_list[0], out_channels, stride=1, leaky=0.0)
+        self.output2 = conv_bn1x1(in_channels_list[1], out_channels, stride=1, leaky=0.0)
+        self.output3 = conv_bn1x1(in_channels_list[2], out_channels, stride=1, leaky=0.0)
+        self.merge1 = conv_bn(out_channels, out_channels, leaky=0.0)
+        self.merge2 = conv_bn(out_channels, out_channels, leaky=0.0)
 
     def forward(self, input: List[torch.Tensor]) -> List[torch.Tensor]:
+        # todos.debug.output_var("FPN input", input)
+        # FPN input is list: len = 3
+        #     tensor [item] size: [1, 512, 44, 63], min: 0.0, max: 2.788131, mean: 0.08262
+        #     tensor [item] size: [1, 1024, 22, 32], min: 0.0, max: 2.534333, mean: 0.033747
+        #     tensor [item] size: [1, 2048, 11, 16], min: 0.0, max: 6.305652, mean: 0.326206
         output1 = self.output1(input[0])
         output2 = self.output2(input[1])
         output3 = self.output3(input[2])
 
+        # Update output2
         up3 = F.interpolate(output3, size=[output2.size(2), output2.size(3)], mode="nearest")
         output2 = output2 + up3
         output2 = self.merge2(output2)
 
+        # Update output1
         up2 = F.interpolate(output2, size=[output1.size(2), output1.size(3)], mode="nearest")
         output1 = output1 + up2
         output1 = self.merge1(output1)
 
         out = [output1, output2, output3]
+        # todos.debug.output_var("FPN output", out)
+        # FPN output is list: len = 3
+        #     tensor [item] size: [1, 256, 44, 63], min: -0.0, max: 6.100448, mean: 0.307941
+        #     tensor [item] size: [1, 256, 22, 32], min: -0.0, max: 8.648984, mean: 0.271562
+        #     tensor [item] size: [1, 256, 11, 16], min: -0.0, max: 8.366714, mean: 0.319153
         return out
 
 
 class ClassHead(nn.Module):
-    def __init__(self, inchannels=256, num_anchors=3):
+    def __init__(self, in_channels=256, num_anchors=3):
         super().__init__()
+        assert in_channels == 256 and num_anchors == 2
+
         self.num_anchors = num_anchors
-        self.conv1x1 = nn.Conv2d(inchannels, self.num_anchors * 2, kernel_size=(1, 1), stride=1, padding=0)
+        self.conv1x1 = nn.Conv2d(in_channels, self.num_anchors * 2, kernel_size=(1, 1), stride=1, padding=0)
 
     def forward(self, x):
         out = self.conv1x1(x)
-        out = out.permute(0, 2, 3, 1).contiguous()
+        out = out.permute(0, 2, 3, 1).contiguous() # [1, 4, 44, 63 --> [1, 44, 63, 4]
+
+        # tensor [ClassHead out1] size: [1, 4, 44, 63], min: -7.161493, max: 6.567798, mean: -0.098771
+        # tensor [ClassHead out2] size: [1, 44, 63, 4], min: -7.161493, max: 6.567798, mean: -0.098771
+        # tensor [ClassHead out1] size: [1, 4, 22, 32], min: -5.042127, max: 5.503387, mean: 0.038149
+        # tensor [ClassHead out2] size: [1, 22, 32, 4], min: -5.042127, max: 5.503387, mean: 0.038149
+        # tensor [ClassHead out1] size: [1, 4, 11, 16], min: -5.83153, max: 6.047755, mean: 0.023791
+        # tensor [ClassHead out2] size: [1, 11, 16, 4], min: -5.83153, max: 6.047755, mean: 0.023791
 
         return out.view(out.shape[0], -1, 2)
 
 
 class BboxHead(nn.Module):
-    def __init__(self, inchannels=256, num_anchors=3):
+    def __init__(self, in_channels=256, num_anchors=3):
         super().__init__()
-        self.conv1x1 = nn.Conv2d(inchannels, num_anchors * 4, kernel_size=(1, 1), stride=1, padding=0)
+        assert in_channels == 256 and num_anchors == 2
+
+        self.conv1x1 = nn.Conv2d(in_channels, num_anchors * 4, kernel_size=(1, 1), stride=1, padding=0)
 
     def forward(self, x):
         out = self.conv1x1(x)
-        out = out.permute(0, 2, 3, 1).contiguous()
+        out = out.permute(0, 2, 3, 1).contiguous() # [1, (8), 44, 63] --> [1, 44, 63, (8)]
+
+        # tensor [BboxHead out1] size: [1, 8, 44, 63], min: -4.104426, max: 3.965507, mean: 0.055684
+        # tensor [BboxHead out2] size: [1, 44, 63, 8], min: -4.104426, max: 3.965507, mean: 0.055684
+        # tensor [BboxHead out1] size: [1, 8, 22, 32], min: -4.950671, max: 5.339179, mean: -0.168055
+        # tensor [BboxHead out2] size: [1, 22, 32, 8], min: -4.950671, max: 5.339179, mean: -0.168055
+        # tensor [BboxHead out1] size: [1, 8, 11, 16], min: -3.178033, max: 2.587976, mean: -0.646355
+        # tensor [BboxHead out2] size: [1, 11, 16, 8], min: -3.178033, max: 2.587976, mean: -0.646354
 
         return out.view(out.shape[0], -1, 4)
 
-
 class LandmarkHead(nn.Module):
-    def __init__(self, inchannels=256, num_anchors=3):
+    def __init__(self, in_channels=256, num_anchors=3):
         super().__init__()
-        self.conv1x1 = nn.Conv2d(inchannels, num_anchors * 10, kernel_size=(1, 1), stride=1, padding=0)
+        assert in_channels == 256 and num_anchors == 2
+        self.conv1x1 = nn.Conv2d(in_channels, num_anchors * 10, kernel_size=(1, 1), stride=1, padding=0)
 
     def forward(self, x):
         out = self.conv1x1(x)
-        out = out.permute(0, 2, 3, 1).contiguous()
+        out = out.permute(0, 2, 3, 1).contiguous() # [1, 20, 44, 63] --> [1, 44, 63, 20]
+
+        # tensor [LandmarkHead out1] size: [1, 20, 44, 63], min: -8.360132, max: 8.982738, mean: 0.138524
+        # tensor [LandmarkHead out2] size: [1, 44, 63, 20], min: -8.360132, max: 8.982738, mean: 0.138524
+        # tensor [LandmarkHead out1] size: [1, 20, 22, 32], min: -10.258643, max: 11.092538, mean: -0.033137
+        # tensor [LandmarkHead out2] size: [1, 22, 32, 20], min: -10.258643, max: 11.092538, mean: -0.033137
+        # tensor [LandmarkHead out1] size: [1, 20, 11, 16], min: -3.90856, max: 4.454429, mean: 0.148574
+        # tensor [LandmarkHead out2] size: [1, 11, 16, 20], min: -3.90856, max: 4.454429, mean: 0.148574
 
         return out.view(out.shape[0], -1, 10)
 
+def make_class_head(fpn_num=3, in_channels=256, anchor_num=2):
+    assert fpn_num == 3 and in_channels == 256 and anchor_num == 2
 
-def make_class_head(fpn_num=3, inchannels=256, anchor_num=2):
     classhead = nn.ModuleList()
     for i in range(fpn_num):
-        classhead.append(ClassHead(inchannels, anchor_num))
+        classhead.append(ClassHead(in_channels, anchor_num))
     return classhead
 
 
-def make_bbox_head(fpn_num=3, inchannels=256, anchor_num=2):
+def make_bbox_head(fpn_num=3, in_channels=256, anchor_num=2):
+    assert fpn_num == 3 and in_channels == 256 and anchor_num == 2
+
     bboxhead = nn.ModuleList()
     for i in range(fpn_num):
-        bboxhead.append(BboxHead(inchannels, anchor_num))
+        bboxhead.append(BboxHead(in_channels, anchor_num))
     return bboxhead
 
 
-def make_landmark_head(fpn_num=3, inchannels=256, anchor_num=2):
+def make_landmark_head(fpn_num=3, in_channels=256, anchor_num=2):
+    assert fpn_num == 3 and in_channels == 256 and anchor_num == 2
+
     landmarkhead = nn.ModuleList()
     for i in range(fpn_num):
-        landmarkhead.append(LandmarkHead(inchannels, anchor_num))
+        landmarkhead.append(LandmarkHead(in_channels, anchor_num))
     return landmarkhead
 
 
@@ -301,22 +341,19 @@ class RetinaFace(nn.Module):
         self.ssh2 = SSH(out_channels, out_channels)
         self.ssh3 = SSH(out_channels, out_channels)
 
-        self.ClassHead = make_class_head(fpn_num=3, inchannels=out_channels)
-        self.BboxHead = make_bbox_head(fpn_num=3, inchannels=out_channels)
-        self.LandmarkHead = make_landmark_head(fpn_num=3, inchannels=out_channels)
+        self.ClassHead = make_class_head(fpn_num=3, in_channels=out_channels)
+        self.BboxHead = make_bbox_head(fpn_num=3, in_channels=out_channels)
+        self.LandmarkHead = make_landmark_head(fpn_num=3, in_channels=out_channels)
 
         load_facedet(self, "models/detection_Resnet50_Final.pth")
 
+        # RGB: mean - [0.485, 0.456, 0.406], std - 0.229, 0.224, 0.225
         self.register_buffer("mean_tensor", torch.tensor([0.4078, 0.4588, 0.4823]).view(1, 3, 1, 1))
         # self.half()
-
-    # def on_cuda(self):
-    #     return self.mean_tensor.is_cuda
+        # pdb.set_trace()
+        # create_network(self)
 
     def forward(self, x):
-        # if self.on_cuda():
-        #     x = x.half()
-
         bgr_image = x[:, [2, 1, 0], :, :]  # change channel from RGB to BGR
 
         B, C, H, W = bgr_image.shape
@@ -329,39 +366,58 @@ class RetinaFace(nn.Module):
         # ==> bgr_image.dtype -- torch.float32, [-123.0, 151.0]
 
 
-        # bgr_image.size() -- [1, 3, 640, 1013]
-        # bgr_image.dtype -- torch.float32, [-123.0, 151.0]
-
+        # tensor [bgr_image] size: [1, 3, 351, 500], min: -108.986504, max: 126.011002, mean: -26.315453
         out = self.body(bgr_image)
+        # out is list: len = 3
+        #     tensor [item] size: [1, 512, 44, 63], min: 0.0, max: 2.788131, mean: 0.08262
+        #     tensor [item] size: [1, 1024, 22, 32], min: 0.0, max: 2.534333, mean: 0.033747
+        #     tensor [item] size: [1, 2048, 11, 16], min: 0.0, max: 6.305652, mean: 0.326206
 
         # FPN
         fpn = self.fpn(out)
+        # fpn is list: len = 3
+        #     tensor [item] size: [1, 256, 44, 63], min: -0.0, max: 6.100448, mean: 0.307941
+        #     tensor [item] size: [1, 256, 22, 32], min: -0.0, max: 8.648984, mean: 0.271562
+        #     tensor [item] size: [1, 256, 11, 16], min: -0.0, max: 8.366714, mean: 0.319153
 
         # SSH
         feature1 = self.ssh1(fpn[0])
         feature2 = self.ssh2(fpn[1])
         feature3 = self.ssh3(fpn[2])
         features = [feature1, feature2, feature3]
+        # tensor [feature1] size: [1, 256, 44, 63], min: 0.0, max: 5.633877, mean: 0.342905
+        # tensor [feature2] size: [1, 256, 22, 32], min: 0.0, max: 5.345377, mean: 0.321881
+        # tensor [feature3] size: [1, 256, 11, 16], min: 0.0, max: 3.646523, mean: 0.264832
+
 
         outs = []
         for i, head in enumerate(self.BboxHead):
             outs.append(head(features[i]))
         bbox_regressions = torch.cat(outs, dim=1)
+        # todos.debug.output_var("bbox_regressions", bbox_regressions)
+        # tensor [bbox_regressions] size: [1, 7304, 4], min: -4.950671, max: 5.339179, mean: -0.02128
 
         outs = []
         for i, head in enumerate(self.ClassHead):
             outs.append(head(features[i]))
         classifications = torch.cat(outs, dim=1)
+        # tensor [classifications] size: [1, 7304, 2], min: -7.161493, max: 6.567798, mean: -0.06647
 
         outs = []
         for i, head in enumerate(self.LandmarkHead):
             outs.append(head(features[i]))
         ldm_regressions = torch.cat(outs, dim=1)
+        # todos.debug.output_var("ldm_regressions", ldm_regressions)
+        # tensor [ldm_regressions] size: [1, 7304, 10], min: -10.258643, max: 11.092538, mean: 0.105917
+
         # bbox_regressions.shape -- [1, 26720, 4]
         # classifications.shape -- [1, 26720, 2]
         # ldm_regressions.shape -- [1, 26720, 10]
 
         conf = F.softmax(classifications, dim=2).squeeze(0)
+        # tensor [conf] size: [7304, 2], min: 3e-06, max: 0.999997, mean: 0.5
+
+
         loc = bbox_regressions.squeeze(0)
         landmarks = ldm_regressions.squeeze(0)
         # (Pdb) conf.size() -- [26720, 2]
@@ -369,6 +425,9 @@ class RetinaFace(nn.Module):
         # (Pdb) landmarks.size() -- [26720, 10]
 
         conf_loc_landmarks = torch.cat((conf, loc, landmarks), dim=1)
+        # todos.debug.output_var("conf_loc_landmarks", conf_loc_landmarks)
+        # tensor [conf_loc_landmarks] size: [7304, 16], min: -10.258643, max: 11.092538, mean: 0.123378
+
         return conf_loc_landmarks.unsqueeze(0).unsqueeze(0) # [1, 1, 26720, 16] extend dim for onnx output
 
 

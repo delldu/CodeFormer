@@ -16,6 +16,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List
 
+# from ggml_engine import create_network
+
+import todos
 import pdb
 
 def load_facegan(model, path):
@@ -142,14 +145,16 @@ class VectorQuantizer(nn.Module):
         b, c, n = indices.size() # (1, 256, 1)
         indices = indices.view(b * c * n, 1) # [256, 1]
         min_encodings = torch.zeros(b * c * n, 1024).to(indices)
-
+        # torch.scatter_(input, dim, index, src)
         min_encodings.scatter_(1, indices, 1)
         # tensor [min_encodings] size: [256, 1024], min: 0.0, max: 1.0, mean: 0.000977
 
         # get quantized latent vectors
         z_q = torch.matmul(min_encodings.to(self.embedding.weight.dtype), self.embedding.weight)
-        z_q = z_q.view(shape).permute(0, 3, 1, 2).contiguous()
-
+        # z_q.size() -- [256, 256], self.embedding.weight.size() -- [1024, 256]
+        # shape -- [1, 16, 16, 256]
+        z_q = z_q.view(shape).permute(0, 3, 1, 2).contiguous() # [1, 16, 16, 256] -> [1, 256, 16, 16]
+        # xxxx_debug
         return z_q
 
 
@@ -322,9 +327,7 @@ class Generator(nn.Module):
 
         blocks.append(normalize(block_in_ch))
         blocks.append(nn.Conv2d(block_in_ch, out_channels=3, kernel_size=3, stride=1, padding=1))
-
         self.blocks = nn.ModuleList(blocks)
-
 
     def forward(self, x):
         for block in self.blocks:
@@ -334,11 +337,6 @@ class Generator(nn.Module):
 
 def calc_mean_std(feat, eps: float = 1e-5) -> List[torch.Tensor]:
     """Calculate mean and std for adaptive_instance_normalization.
-
-    Args:
-        feat (Tensor): 4D tensor.
-        eps (float): A small value added to the variance to avoid
-            divide-by-zero. Default: 1e-5.
     """
     b, c, h, w = feat.size()
     feat_var = feat.view(b, c, h * w).var(dim=2) + eps
@@ -349,8 +347,6 @@ def calc_mean_std(feat, eps: float = 1e-5) -> List[torch.Tensor]:
 
 def adaptive_instance_normalization(content_feat, style_feat):
     """Adaptive instance normalization.
-    Adjust the reference features to have the similar color and illuminations
-    as those in the degradate features.
     """
     size = content_feat.size()
     style_mean, style_std = calc_mean_std(style_feat)
@@ -370,6 +366,9 @@ class TransformerSALayer(nn.Module):
         self.norm2 = nn.LayerNorm(512)
 
     def forward(self, target, query_pos: Optional[torch.Tensor]=None):
+        # tensor [target] size: [256, 1, 512], min: -40.000423, max: 46.497059, mean: 0.031245
+        # tensor [query_pos] size: [256, 1, 512], min: -0.896825, max: 0.903299, mean: 0.000741
+
         # self attention
         target2 = self.norm1(target)
         q = k = target2 + query_pos
@@ -411,37 +410,69 @@ class CodeFormer(nn.Module):
         self.idx_pred_layer = nn.Sequential(nn.LayerNorm(512), nn.Linear(512, 1024, bias=False))
 
         load_facegan(self, "models/codeformer.pth")
+        torch.save(self.state_dict(), "/tmp/facegan.pth")
+
         # self.half()
+        # pdb.set_trace()
+        # create_network(self)
 
     def forward(self, x):
-        # if self.on_cuda():
-        #     x = x.half()
+        # todos.debug.output_var("x1", x)
+        # tensor [x1] size: [1, 3, 512, 512], min: 0.055676, max: 0.864457, mean: 0.235351
 
         x = (x - 0.5) / 0.5  # normal
         # ################### Encoder #####################
         x = self.encoder(x)
+        # tensor [x] size: [1, 256, 16, 16], min: -2.690408, max: 2.767376, mean: -0.009793
 
         lq_feat = x
         # ################# Transformer ###################
+
         pos_emb = self.position_emb.unsqueeze(1).repeat(1, x.shape[0], 1)
+        # [256, 512] --> [256, 1, 512]
         query_emb = self.feat_emb(lq_feat.flatten(2).permute(2, 0, 1)) # BCHW -> BC(HW) -> (HW)BC
+        # [1, 256, 16, 16] --> [1, 256, 256] --> [256, 1, 256] --> [256, 1, 512]
+
+        # todos.debug.output_var("pos_emb", pos_emb)
+        # todos.debug.output_var("query_emb 1", query_emb)
+        # tensor [pos_emb] size: [256, 1, 512], min: -0.896825, max: 0.903299, mean: 0.000741
+        # tensor [query_emb 1] size: [256, 1, 512], min: -40.000423, max: 46.497059, mean: 0.031245
 
         # Transformer encoder
         for layer in self.ft_layers: # 9 layers
             query_emb = layer(query_emb, query_pos=pos_emb)
+        # tensor [query_emb] size: [256, 1, 512], min: -61.123913, max: 77.953194, mean: 0.027153
 
         # output logits
-        logits = self.idx_pred_layer(query_emb)  # (hw)bn
-        logits = logits.permute(1, 0, 2)  # (hw)bn -> b(hw)n
+        logits = self.idx_pred_layer(query_emb)  # (HW)BC
+        logits = logits.permute(1, 0, 2)  # (HW)BC -> B(HW)C
+        # tensor [logits] size: [1, 256, 1024], min: -15.930029, max: 22.454041, mean: -1.539261
 
-        soft_one_hot = F.softmax(logits, dim=2)
+        soft_one_hot = F.softmax(logits, dim=2) # [1, 256, 1024]
+        # GGML_API struct ggml_tensor * ggml_soft_max(
+        #         struct ggml_context * ctx,
+        #         struct ggml_tensor  * a);
+
         _, top_index = torch.topk(soft_one_hot, 1, dim=2)
-        quant_feat = self.quantize(top_index, shape=[x.shape[0], 16, 16, 256])
+        # // top k elements per row
+        # GGML_API struct ggml_tensor * ggml_top_k(
+        #         struct ggml_context * ctx,
+        #         struct ggml_tensor  * a,
+        #         int                   k);
+
+        # todos.debug.output_var("top_index", top_index)
+        # tensor [top_index] size: [1, 256, 1], min: 2.0, max: 1014.0, mean: 502.945312
+        # top_index.dtype -- torch.int64
+        quant_feat = self.quantize(top_index, shape=[x.shape[0], 16, 16, 256]) # shape [1, 16, 16, 256]
+        # tensor [quant_feat] size: [1, 256, 16, 16], min: -2.466374, max: 2.514146, mean: -0.011886
 
         x = adaptive_instance_normalization(quant_feat, lq_feat)
+        # tensor [x] size: [1, 256, 16, 16], min: -2.390994, max: 2.475082, mean: -0.009793
 
         # ################## Generator ####################
         out = self.generator(x)
+        # todos.debug.output_var("out", out)
+        # tensor [out] size: [1, 3, 512, 512], min: -0.956786, max: 0.922379, mean: -0.51932
 
         out = (out + 1.0) / 2.0  # change from [-1.0, 1.0] to [0.0, 1.0]
 
