@@ -62,6 +62,8 @@ struct Linear {
 
     void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype = GGML_TYPE_F16)
     {
+        GGML_ASSERT(in_features > 0 && out_features > 0);
+
         weight = ggml_new_tensor_2d(ctx, wtype, in_features, out_features);
         if (has_bias) {
             bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, out_features);
@@ -108,6 +110,8 @@ struct Conv2d {
 
     void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype=GGML_TYPE_F16)
     {
+        GGML_ASSERT(in_channels > 0 && out_channels > 0);
+
         if (is_depthwise) {
             weight = ggml_new_tensor_4d(ctx, wtype, kernel_size.second, kernel_size.first, 1 /*in_channels*/, out_channels);
         } else {
@@ -160,6 +164,8 @@ struct ConvTranspose2d {
 
     void create_weight_tensors(ggml_context_t* ctx, ggml_type wtype=GGML_TYPE_F16)
     {
+        GGML_ASSERT(in_channels > 0 && out_channels > 0);
+
         weight = ggml_new_tensor_4d(ctx, wtype, kernel_size, kernel_size, out_channels, in_channels);
         if (has_bias) {
             bias = ggml_new_tensor_1d(ctx, (wtype == GGML_TYPE_Q8_0)? GGML_TYPE_F16 : GGML_TYPE_F32, out_channels);
@@ -198,6 +204,8 @@ struct LayerNorm {
 
     void create_weight_tensors(ggml_context_t* ctx)
     {
+        GGML_ASSERT(normalized_shape > 0);
+
         w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, normalized_shape);
         b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, normalized_shape);
     }
@@ -234,6 +242,8 @@ struct BatchNorm2d {
 
     void create_weight_tensors(ggml_context_t* ctx)
     {
+        GGML_ASSERT(num_features > 0);
+
         w = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_features);
         b = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_features);
 
@@ -274,6 +284,7 @@ struct GroupNorm {
 
     void create_weight_tensors(ggml_context_t* ctx)
     {
+        GGML_ASSERT(num_channels > 0);
         // norm use GGML_TYPE_F32 !!!
         weight = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_channels);
         bias = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, num_channels);
@@ -332,6 +343,7 @@ struct PixelShuffle {
     void create_weight_tensors(ggml_context_t* ctx)
     {
         GGML_UNUSED(ctx);
+        GGML_ASSERT(upscale_factor > 0);
     }
 
     void setup_weight_names(const char* prefix)
@@ -358,6 +370,7 @@ struct PixelUnshuffle {
     void create_weight_tensors(ggml_context_t* ctx)
     {
         GGML_UNUSED(ctx);
+        GGML_ASSERT(downscale_factor > 0);
     }
 
     void setup_weight_names(const char* prefix)
@@ -386,6 +399,7 @@ struct Mean {
     void create_weight_tensors(ggml_context_t* ctx)
     {
         GGML_UNUSED(ctx);
+        GGML_ASSERT(dim >= 0 && dim < 4);
     }
 
     void setup_weight_names(const char* prefix)

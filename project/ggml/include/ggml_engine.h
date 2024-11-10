@@ -284,7 +284,6 @@ int GGMLNetwork::m_network_init()
     // Create tensor and their memory on device cpu
     {
         size_t mem_size = ggml_tensor_overhead() * num_tensors;
-
         struct ggml_init_params params = {
             /*.mem_size   =*/mem_size,
             /*.mem_buffer =*/NULL,
@@ -453,8 +452,10 @@ int GGMLNetwork::load_weight(GGMLModel* model, const char* prefix)
                 ggml_backend_tensor_set(t, dest_buffer.data(), 0, ggml_nbytes(t));
             }
         }
+
         // syslog_debug("Loading %s ... OK", t->name);
         n_loaded_tensors++;
+
     }
 
     read_buffer.clear();

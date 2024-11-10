@@ -186,92 +186,91 @@ int image_facegan(CodeFormer *net, char *input_filename, char *output_filename)
     // int pad_h = (MAX_TIMES - (H % MAX_TIMES)) % MAX_TIMES;
     // int pad_w = (MAX_TIMES - (W % MAX_TIMES)) % MAX_TIMES;
 
-    to_bgr_image(input_tensor);
     argv[0] = input_tensor ;
     TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
 
-    TENSOR *xxxx_test = net->get_output_tensor("x0");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** x0", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("r1");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r1", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // TENSOR *xxxx_test = net->get_output_tensor("x0");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** x0", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("r1");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** r1", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
-    xxxx_test = net->get_output_tensor("r2");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r2", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // xxxx_test = net->get_output_tensor("r2");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** r2", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
-    xxxx_test = net->get_output_tensor("r3");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r3", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // xxxx_test = net->get_output_tensor("r3");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** r3", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
-    xxxx_test = net->get_output_tensor("r4");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** r4", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // xxxx_test = net->get_output_tensor("r4");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** r4", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
 
 
-    xxxx_test = net->get_output_tensor("x1");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** x1", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("x2");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** x2", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("x3");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** x3", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("f0");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** f0", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("f1");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** f1", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("f2");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** f2", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // xxxx_test = net->get_output_tensor("x1");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** x1", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("x2");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** x2", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("x3");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** x3", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("f0");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** f0", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("f1");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** f1", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("f2");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** f2", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
-    xxxx_test = net->get_output_tensor("bbox_regressions");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** bbox_regressions", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("score_regressions");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** score_regressions", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("ldm_regressions");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** ldm_regressions", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("conf_loc_landmarks");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** conf_loc_landmarks", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
+    // xxxx_test = net->get_output_tensor("bbox_regressions");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** bbox_regressions", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("score_regressions");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** score_regressions", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("ldm_regressions");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** ldm_regressions", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
+    // xxxx_test = net->get_output_tensor("conf_loc_landmarks");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** conf_loc_landmarks", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
 
     if (tensor_valid(output_tensor)) {
@@ -355,7 +354,7 @@ int main(int argc, char** argv)
         // -----------------------------------------------------------------------------------------
         net.set_device(device_no);
         net.start_engine();
-        net.dump();
+        // net.dump();
     }
 
     for (int i = optind; i < argc; i++) {
@@ -365,6 +364,7 @@ int main(int argc, char** argv)
         } else {
             snprintf(output_filename, sizeof(output_filename), "%s/%s", output_dir, argv[i]);
         }
+
 
         net.load_weight(&model, "");
         // image_facedet(&net, argv[i], output_filename);
