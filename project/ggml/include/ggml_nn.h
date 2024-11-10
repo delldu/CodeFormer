@@ -378,6 +378,7 @@ ggml_tensor_t* ggml_nn_normalize(ggml_context_t *ctx, ggml_tensor_t *x, ggml_ten
 // torch.mean(input, dim, keepdim=False, *, dtype=None, out=None)
 
 ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim);
+ggml_tensor_t* ggml_nn_std(ggml_context_t *ctx, ggml_tensor_t *x, int dim, float eps);
 
 struct Mean {
     int dim = 2; // mean on channel, keepdim == true
@@ -603,6 +604,18 @@ ggml_tensor_t* ggml_nn_mean(ggml_context_t *ctx, ggml_tensor_t *x, int dim)
     return x;
 }
 
+ggml_tensor_t* ggml_nn_std(ggml_context_t *ctx, ggml_tensor_t *x, int dim, float eps)
+{
+    ggml_tensor_t *m = ggml_nn_mean(ctx, x, dim);
+
+    x = ggml_sub_inplace(ctx, x, m);
+    x = ggml_mul_inplace(ctx, x, x);
+    x = ggml_nn_mean(ctx, x, dim);
+    x = ggml_add_constant(ctx, x, eps);
+    x = ggml_sqrt_inplace(ctx, x);
+
+    return x;
+}
 
 // ggml_tensor_t* ggml_nn_slice(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int start /*0*/, int stop /*x->ne[dim]*/, int step /*1*/);
 ggml_tensor_t* ggml_nn_slice(ggml_context_t *ctx, ggml_tensor_t *x, int dim, int start, int stop, int step)

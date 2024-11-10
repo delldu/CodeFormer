@@ -16,6 +16,7 @@
 #include <nimage/tensor.h>
 
 #include <facedet.h>
+#include <facegan.h>
 
 #define DEFAULT_DEVICE 1
 #define DEFAULT_OUTPUT "output"
@@ -46,7 +47,7 @@ static int to_bgr_image(TENSOR *x)
 }
 
 
-int image_face_client(RetinaFace *net, char *input_filename, char *output_filename)
+int image_facedet(RetinaFace *net, char *input_filename, char *output_filename)
 {
     TENSOR *argv[1];
 
@@ -165,6 +166,131 @@ int image_face_client(RetinaFace *net, char *input_filename, char *output_filena
 }
 
 
+int image_facegan(CodeFormer *net, char *input_filename, char *output_filename)
+{
+    TENSOR *argv[1];
+
+    printf("Face %s to %s ...\n", input_filename, output_filename);
+    TENSOR *pre_input_tensor = tensor_load_image(input_filename, 0 /*alpha*/);
+    check_tensor(pre_input_tensor);
+
+    TENSOR *input_tensor = tensor_zoom(pre_input_tensor, 512, 512);
+    check_tensor(input_tensor);
+
+    // // self.MAX_H = 2048
+    // // self.MAX_W = 4096
+    // // self.MAX_TIMES = 32
+    // const int MAX_TIMES = 32;
+    // int H = input_tensor->height;
+    // int W = input_tensor->width;
+    // int pad_h = (MAX_TIMES - (H % MAX_TIMES)) % MAX_TIMES;
+    // int pad_w = (MAX_TIMES - (W % MAX_TIMES)) % MAX_TIMES;
+
+    to_bgr_image(input_tensor);
+    argv[0] = input_tensor ;
+    TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
+
+    TENSOR *xxxx_test = net->get_output_tensor("x0");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** x0", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("r1");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** r1", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("r2");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** r2", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("r3");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** r3", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("r4");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** r4", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+
+
+    xxxx_test = net->get_output_tensor("x1");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** x1", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("x2");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** x2", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("x3");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** x3", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("f0");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** f0", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("f1");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** f1", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("f2");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** f2", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("bbox_regressions");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** bbox_regressions", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("score_regressions");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** score_regressions", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("ldm_regressions");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** ldm_regressions", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("conf_loc_landmarks");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** conf_loc_landmarks", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+
+    if (tensor_valid(output_tensor)) {
+        // if (tensor_zeropad_(output_tensor, H, W) == RET_OK) {
+        //     tensor_saveas_image(output_tensor, 0 /*batch*/, output_filename);
+        // }
+        tensor_show("output_tensor", output_tensor);
+
+        tensor_destroy(output_tensor);
+    }
+    tensor_destroy(input_tensor);
+
+    tensor_destroy(pre_input_tensor);
+
+    return RET_OK;
+}
+
+
+
 static void image_patch_help(char* cmd)
 {
     printf("Usage: %s [option] image_files\n", cmd);
@@ -215,12 +341,15 @@ int main(int argc, char** argv)
     if (optind == argc) // no input image, nothing to do ...
         return 0;
 
-    RetinaFace net;
+    // RetinaFace net;
+    CodeFormer net;
 
     // load net weight ...
     GGMLModel model;
     {
-        check_point(model.preload("models/image_facedet_f32.gguf") == RET_OK);
+        // check_point(model.preload("models/image_facedet_f32.gguf") == RET_OK);
+        check_point(model.preload("models/image_facegan_f32.gguf") == RET_OK);
+
         // model.remap("module.", "");
 
         // -----------------------------------------------------------------------------------------
@@ -238,7 +367,9 @@ int main(int argc, char** argv)
         }
 
         net.load_weight(&model, "");
-        image_face_client(&net, argv[i], output_filename);
+        // image_facedet(&net, argv[i], output_filename);
+
+        image_facegan(&net, argv[i], output_filename);
     }
 
     // free network ...
