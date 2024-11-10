@@ -1157,8 +1157,6 @@ struct CodeFormer : GGMLNetwork {
 
         ggml_tensor_t* x = argv[0];
 
-        return x; // xxxx_debug
-
         // tensor [x] size: [1, 3, 512, 512], min: 0.055676, max: 0.864457, mean: 0.235351
         // x = (x - 0.5)/0.5
         x = ggml_add_constant(ctx, x, -0.5);
