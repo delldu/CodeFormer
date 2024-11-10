@@ -1156,6 +1156,7 @@ struct CodeFormer : GGMLNetwork {
         GGML_UNUSED(argc);
 
         ggml_tensor_t* x = argv[0];
+        ggml_tensor_dump("x", x);
 
         // tensor [x] size: [1, 3, 512, 512], min: 0.055676, max: 0.864457, mean: 0.235351
         // x = (x - 0.5)/0.5
@@ -1163,39 +1164,50 @@ struct CodeFormer : GGMLNetwork {
         x = ggml_scale(ctx, x, 2.0); 
         x = encoder.forward(ctx, x);
         // tensor [x] size: [1, 256, 16, 16], min: -2.690408, max: 2.767376, mean: -0.009793
+        ggml_tensor_dump("x", x);
 
         ggml_tensor_t *pos_emb = ggml_reshape_3d(ctx, position_emb, 256, 1, 512);
         // # tensor [pos_emb] size: [256, 1, 512], min: -0.896825, max: 0.903299, mean: 0.000741
+        ggml_tensor_dump("pos_emb", pos_emb);
 
         ggml_tensor_t *lq_feat = x;
         ggml_tensor_t *t = ggml_reshape_4d(ctx, lq_feat, 256, 256, 1, 1); // BCHW --> BC(HW)
         t = ggml_permute(ctx, t, 256, 1, 256, 1); // BC(HW) --> (HW)BC
         ggml_tensor_t *query_emb = feat_emb.forward(ctx, ggml_cont(ctx, t));
         // # tensor [query_emb 1] size: [256, 1, 512], min: -40.000423, max: 46.497059, mean: 0.031245
+        ggml_tensor_dump("query_emb", query_emb);
 
         for (int i = 0; i < 9; i++) {
             query_emb = ft_layers[i].forward(ctx, query_emb, pos_emb);
         }
         // # tensor [query_emb] size: [256, 1, 512], min: -61.123913, max: 77.953194, mean: 0.027153
+        ggml_tensor_dump("query_emb2", query_emb);
+
+
         // logits = self.idx_pred_layer(query_emb)  # (HW)BC
         ggml_tensor_t *logits = idx_pred_layer_0.forward(ctx, query_emb);
         logits = idx_pred_layer_1.forward(ctx, logits);
         logits = ggml_cont(ctx, ggml_permute(ctx, logits, 0, 2, 1, 3));
         // # tensor [logits] size: [1, 256, 1024], min: -15.930029, max: 22.454041, mean: -1.539261
+        ggml_tensor_dump("logits", logits);
 
         ggml_tensor_t *soft_one_hot = ggml_soft_max(ctx, logits); // [1024, 256, 1]
         ggml_tensor_t *top_index = ggml_top_k(ctx, soft_one_hot, 1 /*k*/);
         // # tensor [top_index] size: [1, 256, 1], min: 2.0, max: 1014.0, mean: 502.945312
+        ggml_tensor_dump("top_index", top_index);
 
         ggml_tensor_t *quant_feat = quantize.forward(ctx, top_index);
         // # tensor [quant_feat] size: [1, 256, 16, 16], min: -2.466374, max: 2.514146, mean: -0.011886
+        ggml_tensor_dump("quant_feat", quant_feat);
 
         x = instance_normal(ctx, quant_feat, lq_feat);
         // # tensor [x] size: [1, 256, 16, 16], min: -2.390994, max: 2.475082, mean: -0.009793
+        ggml_tensor_dump("x001", x);
 
         // # ################## Generator ####################
         ggml_tensor_t *out = generator.forward(ctx, x);
         // # tensor [out] size: [1, 3, 512, 512], min: -0.956786, max: 0.922379, mean: -0.51932
+        ggml_tensor_dump("out", out);
 
         // out = (out + 1.0) / 2.0  # change from [-1.0, 1.0] to [0.0, 1.0]
         out = ggml_add_constant(ctx, out, 1.0);
