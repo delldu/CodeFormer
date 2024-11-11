@@ -165,6 +165,9 @@ struct TransformerSALayer {
     void setup_weight_names(const char *prefix) {
         char s[GGML_MAX_NAME];
 
+        snprintf(s, sizeof(s), "%s%s", prefix, "self_attn.");
+        self_attn.setup_weight_names(s);
+
         snprintf(s, sizeof(s), "%s%s", prefix, "linear1.");
         linear1.setup_weight_names(s);
         snprintf(s, sizeof(s), "%s%s", prefix, "linear2.");
@@ -1177,10 +1180,10 @@ struct CodeFormer : GGMLNetwork {
             ft_layers[i].setup_weight_names(s);
         }
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "idx_pred_layer.0");
+        snprintf(s, sizeof(s), "%s%s", prefix, "idx_pred_layer.0.");
         idx_pred_layer_0.setup_weight_names(s);
 
-        snprintf(s, sizeof(s), "%s%s", prefix, "idx_pred_layer.1");
+        snprintf(s, sizeof(s), "%s%s", prefix, "idx_pred_layer.1.");
         idx_pred_layer_1.setup_weight_names(s);
     }
 
