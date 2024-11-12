@@ -409,75 +409,14 @@ TENSOR *facegan_forward(CodeFormer *net, TENSOR *input_tensor)
 
     TENSOR *argv[1];
     argv[0] = input_tensor ;
-    tensor_show("------ facegan_forward input", input_tensor);
 	TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
     CHECK_TENSOR(output_tensor);
 
-    tensor_show("------ facegan_forward output", output_tensor);
-
-
-    TENSOR *xxxx_test = net->get_output_tensor("out");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** out", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-
-
-    xxxx_test = net->get_output_tensor("encoder");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** encoder", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-
-    xxxx_test = net->get_output_tensor("lq_feat");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** lq_feat", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }    
-    xxxx_test = net->get_output_tensor("query_emb");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** query_emb", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }    
-    xxxx_test = net->get_output_tensor("z_q");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** z_q", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }   
-
-    xxxx_test = net->get_output_tensor("x0");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("============================ x0", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("x1");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("============================ x1", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("x2");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("============================ x2", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-    xxxx_test = net->get_output_tensor("x3");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("============================ x3", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }
-
-    xxxx_test = net->get_output_tensor("h_x");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** h_x", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }    
-
-    xxxx_test = net->get_output_tensor("a_x");
-    if (tensor_valid(xxxx_test)) {
-        tensor_show("********************** a_x", xxxx_test);
-        tensor_destroy(xxxx_test);
-    }    
-
+    // TENSOR *xxxx_test = net->get_output_tensor("out");
+    // if (tensor_valid(xxxx_test)) {
+    //     tensor_show("********************** out", xxxx_test);
+    //     tensor_destroy(xxxx_test);
+    // }
 
 	return output_tensor;
 }
@@ -536,7 +475,6 @@ int face_gan(CodeFormer *net, GGMLModel *gan_model, TENSOR* input, TENSOR* detec
 {
     check_tensor(input);
     check_tensor(detect_result);
-    tensor_show("detect_result", detect_result);
 
     TENSOR* face_mask = standard_face_mask(input->batch, input->chan);
     check_tensor(face_mask);
@@ -554,7 +492,6 @@ int face_gan(CodeFormer *net, GGMLModel *gan_model, TENSOR* input, TENSOR* detec
 
         TENSOR* cropped_face = get_affine_image(input, matrix, STANDARD_FACE_SIZE, STANDARD_FACE_SIZE);
         check_tensor(cropped_face);
-        tensor_show("cropped_face", cropped_face);
 
         net->load_weight(gan_model, "");
         TENSOR* refined_face = facegan_forward(net, cropped_face);
@@ -624,7 +561,7 @@ int image_face_detect(int device, int argc, char** argv, char *output_dir)
     // load net weight ...
     GGMLModel model;
     {
-        check_point(model.preload("models/image_facedet_f32.gguf") == RET_OK);
+        check_point(model.preload("models/image_facedet_f16.gguf") == RET_OK);
         net.set_device(device);
         net.start_engine();
     }
@@ -662,8 +599,8 @@ int image_face_beauty(int device, int argc, char** argv, char *output_dir)
     GGMLModel det_model;
     GGMLModel gan_model;
     {
-        check_point(det_model.preload("models/image_facedet_f32.gguf") == RET_OK);
-        check_point(gan_model.preload("models/image_facegan_f32.gguf") == RET_OK);
+        check_point(det_model.preload("models/image_facedet_f16.gguf") == RET_OK);
+        check_point(gan_model.preload("models/image_facegan_f16.gguf") == RET_OK);
 
         // -----------------------------------------------------------------------------------------
         det_net.set_device(device);
