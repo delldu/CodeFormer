@@ -212,11 +212,11 @@ struct SSH {
         ggml_tensor_t *conv3 = conv3X3.forward(ctx, x);
 
         x = conv5X5_1.forward(ctx, x);
-        ggml_tensor_t *conv5X5_1 = ggml_leaky_relu(ctx, x, 0.0, true /*inplace*/);
+        ggml_tensor_t *conv5X5_1 = ggml_leaky_relu(ctx, x, 0.0, false /*inplace*/);
         ggml_tensor_t *conv5 = conv5X5_2.forward(ctx, conv5X5_1);
         
         conv5X5_1 = conv7X7_2.forward(ctx, conv5X5_1);
-        ggml_tensor_t *conv7X7_2 = ggml_leaky_relu(ctx, conv5X5_1, 0.0, true /*inplace*/);
+        ggml_tensor_t *conv7X7_2 = ggml_leaky_relu(ctx, conv5X5_1, 0.0, false /*inplace*/);
         ggml_tensor_t *conv7 = conv7X7_3.forward(ctx, conv7X7_2);
 
         ggml_tensor_t *out = ggml_concat(ctx, conv3, conv5, 2/*dim*/);
@@ -472,7 +472,7 @@ struct Bottleneck {
         x = bn3.forward(ctx, x);
 
         x = ggml_add(ctx, x, id);
-        x = ggml_relu_inplace(ctx, x);
+        x = ggml_relu(ctx, x);
     	return x;
     }
 };
@@ -693,7 +693,7 @@ struct ResNet3Layers {
 
         x = conv1.forward(ctx, x);
         x = bn1.forward(ctx, x);
-        x = ggml_relu_inplace(ctx, x);
+        x = ggml_relu(ctx, x);
         x = maxpool.forward(ctx, x);
 
         // layer1

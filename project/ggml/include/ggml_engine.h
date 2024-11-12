@@ -107,7 +107,7 @@ public:
         // GGML_UNUSED(ctx);
         GGML_UNUSED(argc);
         auto x = argv[0];
-        return ggml_dup_inplace(ctx, x); // do not use 'return x;' directly !!!
+        return ggml_dup(ctx, x); // do not use 'return x;' directly !!!
     }
     virtual size_t get_graph_size()
     {
@@ -573,7 +573,7 @@ TENSOR* GGMLNetwork::m_compute(int argc, ggml_tensor_t* argv[])
             ggml_tensor_t* leaf = ggml_graph_leaf(gf, i);
             if (leaf->flags & GGML_TENSOR_FLAG_OUTPUT) {
                 // Saving leafs ...
-                TENSOR* yt = get_tensor_value(leaf); // , true /*from_backend*/);
+                TENSOR* yt = get_tensor_value(leaf); // true /*from_backend*/);
                 m_ggml_engine.output_tensors[std::string(leaf->name)] = yt;
             }
         }
@@ -583,7 +583,7 @@ TENSOR* GGMLNetwork::m_compute(int argc, ggml_tensor_t* argv[])
             ggml_tensor_t* node = ggml_graph_node(gf, i);
             if (node->flags & GGML_TENSOR_FLAG_OUTPUT) {
                 // Saving nodes ...
-                TENSOR* yt = get_tensor_value(node); // , true /*from_backend*/);
+                TENSOR* yt = get_tensor_value(node); // true /*from_backend*/);
                 m_ggml_engine.output_tensors[std::string(node->name)] = yt;
             }
         }
@@ -775,6 +775,8 @@ TENSOR* get_tensor_value(ggml_tensor_t* tensor)
 {
     CHECK_POINT(tensor);
     void* backend_data = NULL;
+
+    GGML_ASSERT(ggml_is_contiguous(tensor));
 
     bool from_backend = ! (tensor->buffer == NULL || ggml_backend_buffer_is_host(tensor->buffer));
 

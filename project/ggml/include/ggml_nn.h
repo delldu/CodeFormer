@@ -324,8 +324,6 @@ struct MaxPool2d {
     }
 };
 
-
-
 // ----------------------------------------------------------------------------------------------------------------------------------------
 // class torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=0.0, bias=True, 
 //      add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None, batch_first=False, device=None, dtype=None)[source]
@@ -422,7 +420,7 @@ ggml_tensor_t* ggml_nn_mul_mat(ggml_context_t *ctx, ggml_tensor_t *a, ggml_tenso
 #ifdef GGML_NN_IMPLEMENTATION
 ggml_tensor_t* ggml_nn_identity(ggml_context_t* ctx, ggml_tensor_t* x)
 {
-    return ggml_dup_inplace(ctx, x);
+    return ggml_dup(ctx, x);
 }
 
 
@@ -438,7 +436,7 @@ ggml_tensor_t* ggml_nn_conv_2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tenso
     if (b != NULL) {
         // b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1));
         b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
-        x = ggml_add_inplace(ctx, x, b);
+        x = ggml_add(ctx, x, b);
     }
 
     return x;
@@ -460,7 +458,7 @@ ggml_tensor_t* ggml_nn_conv_transpose_2d(ggml_context_t* ctx, ggml_tensor_t* x, 
     b = ggml_reshape_4d(ctx, b, 1, 1, out_channels, 1); // import !!!
 
     x = ggml_conv_2d(ctx, w, x, 1, 1, 1, 1, 1, 1);
-    x = ggml_add_inplace(ctx, x, b);
+    x = ggml_add(ctx, x, b);
 
     // need output padding ?
     // (H - 1) * stride - 2 * padding + kernel_size + output_padding
@@ -481,16 +479,16 @@ ggml_tensor_t* ggml_nn_layer_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_te
     // ------------------------------------------------
     ggml_tensor_t *u = ggml_mean(ctx, x); // ggml_nn_mean(ctx, x, 0); // dim = 0
     // u = ggml_repeat(ctx, u, x);
-    ggml_tensor_t *d = ggml_sub_inplace(ctx, x, u);
+    ggml_tensor_t *d = ggml_sub(ctx, x, u);
 
-    ggml_tensor_t *s = ggml_mul_inplace(ctx, d, d);
+    ggml_tensor_t *s = ggml_mul(ctx, d, d);
     s = ggml_mean(ctx, s); // ggml_nn_mean(ctx, s, 0); // dim = 0
     s = ggml_nn_add(ctx, s, eps);
-    s = ggml_sqrt_inplace(ctx, s);
-    x = ggml_div_inplace(ctx, d, s);
+    s = ggml_sqrt(ctx, s);
+    x = ggml_div(ctx, d, s);
     // ------------------------------------------------
-    x = ggml_mul_inplace(ctx, x, w);
-    x = ggml_add_inplace(ctx, x, b);
+    x = ggml_mul(ctx, x, w);
+    x = ggml_add(ctx, x, b);
 
     return x;
 }
@@ -511,13 +509,13 @@ ggml_tensor_t* ggml_nn_batch_norm2d(ggml_context_t* ctx, ggml_tensor_t* x, ggml_
 
     // var += eps;
     var = ggml_nn_add(ctx, var, eps);
-    var = ggml_sqrt_inplace(ctx, var);
+    var = ggml_sqrt(ctx, var);
 
     // mean = ggml_repeat(ctx, mean, x); // need ?
-    x = ggml_sub_inplace(ctx, x, mean);
-    x = ggml_div_inplace(ctx, x, var);
-    x = ggml_mul_inplace(ctx, x, w);
-    x = ggml_add_inplace(ctx, x, b);
+    x = ggml_sub(ctx, x, mean);
+    x = ggml_div(ctx, x, var);
+    x = ggml_mul(ctx, x, w);
+    x = ggml_add(ctx, x, b);
 
     return x;
 }
@@ -534,11 +532,11 @@ ggml_tensor_t* ggml_nn_attention(ggml_context_t* ctx, ggml_tensor_t* q, ggml_ten
     float d_head = (float)q->ne[0];
 
     ggml_tensor_t* kq = ggml_mul_mat(ctx, k, q); // [N * n_head, n_token, n_k]
-    kq = ggml_scale_inplace(ctx, kq, 1.0f / sqrt(d_head));
+    kq = ggml_scale(ctx, kq, 1.0f / sqrt(d_head));
     if (mask) {
-        kq = ggml_diag_mask_inf_inplace(ctx, kq, 0);
+        kq = ggml_diag_mask_inf(ctx, kq, 0);
     }
-    kq = ggml_soft_max_inplace(ctx, kq);
+    kq = ggml_soft_max(ctx, kq);
 
     ggml_tensor_t* kqv = ggml_mul_mat(ctx, v, kq); // [N * n_head, n_token, d_head]
 #endif
@@ -552,9 +550,9 @@ ggml_tensor_t* ggml_nn_group_norm(ggml_context_t* ctx, ggml_tensor_t* x, ggml_te
         b = ggml_cont(ctx, ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1));
     }
 
-    x = ggml_group_norm_inplace(ctx, x, num_groups, 1e-6); // TODO: eps is hardcoded to 1e-6 for now
-    x = ggml_mul_inplace(ctx, x, w);
-    x = ggml_add_inplace(ctx, x, b);
+    x = ggml_group_norm(ctx, x, num_groups, 1e-6); // TODO: eps is hardcoded to 1e-6 for now
+    x = ggml_mul(ctx, x, w);
+    x = ggml_add(ctx, x, b);
     return x;
 }
 
@@ -562,7 +560,7 @@ ggml_tensor_t* ggml_nn_linear(ggml_context_t* ctx, ggml_tensor_t* x, ggml_tensor
 {
     x = ggml_mul_mat(ctx, w, x);
     if (b != NULL) {
-        x = ggml_add_inplace(ctx, x, b);
+        x = ggml_add(ctx, x, b);
     }
     return x;
 }
@@ -588,7 +586,7 @@ ggml_tensor_t* ggml_nn_normalize(ggml_context_t *ctx, ggml_tensor_t *x, ggml_ten
 {
     mean = ggml_repeat(ctx, mean, x);
     std = ggml_repeat(ctx, std, x);
-    return ggml_div_inplace(ctx, ggml_sub_inplace(ctx, x, mean), std);
+    return ggml_div(ctx, ggml_sub(ctx, x, mean), std);
 }
 
 
@@ -622,11 +620,11 @@ ggml_tensor_t* ggml_nn_std(ggml_context_t *ctx, ggml_tensor_t *x, int dim, float
 {
     ggml_tensor_t *m = ggml_nn_mean(ctx, x, dim);
 
-    x = ggml_sub_inplace(ctx, x, m);
-    x = ggml_mul_inplace(ctx, x, x);
+    x = ggml_sub(ctx, x, m);
+    x = ggml_mul(ctx, x, x);
     x = ggml_nn_mean(ctx, x, dim);
-    x = ggml_add_constant(ctx, x, eps);
-    x = ggml_sqrt_inplace(ctx, x);
+    x = ggml_nn_add(ctx, x, eps); // ggml_add_constant(ctx, x, eps);
+    x = ggml_sqrt(ctx, x);
 
     return x;
 }
@@ -713,10 +711,10 @@ ggml_tensor_t* ggml_nn_mul_mat(ggml_context_t *ctx, ggml_tensor_t *a, ggml_tenso
 ggml_tensor_t* ggml_nn_add(ggml_context_t *ctx, ggml_tensor_t *x, float value)
 {
     ggml_tensor_t *a = ggml_dup(ctx, x);
-    // a = ggml_clamp(ctx, a, value, value); // a = value
-    a = ggml_constant(ctx, a, value); // a = value
+    a = ggml_clamp(ctx, a, value, value); // a = value
+    // a = ggml_constant(ctx, a, value); // a = value
 
-    return ggml_add_inplace(ctx, x, a);
+    return ggml_add(ctx, x, a);
 }
 
 ggml_tensor_t* ggml_nn_grid_y(ggml_context_t *ctx, ggml_tensor_t *x, int h)

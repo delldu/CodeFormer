@@ -409,13 +409,76 @@ TENSOR *facegan_forward(CodeFormer *net, TENSOR *input_tensor)
 
     TENSOR *argv[1];
     argv[0] = input_tensor ;
-
+    tensor_show("------ facegan_forward input", input_tensor);
 	TENSOR *output_tensor = net->engine_forward(ARRAY_SIZE(argv), argv);
-    // TENSOR *xxxx_test = net->get_output_tensor("x0");
-    // if (tensor_valid(xxxx_test)) {
-    //     tensor_show("********************** x0", xxxx_test);
-    //     tensor_destroy(xxxx_test);
-    // }
+    CHECK_TENSOR(output_tensor);
+
+    tensor_show("------ facegan_forward output", output_tensor);
+
+
+    TENSOR *xxxx_test = net->get_output_tensor("out");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** out", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+
+    xxxx_test = net->get_output_tensor("encoder");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** encoder", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("lq_feat");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** lq_feat", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }    
+    xxxx_test = net->get_output_tensor("query_emb");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** query_emb", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }    
+    xxxx_test = net->get_output_tensor("z_q");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** z_q", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }   
+
+    xxxx_test = net->get_output_tensor("x0");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("============================ x0", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("x1");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("============================ x1", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("x2");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("============================ x2", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+    xxxx_test = net->get_output_tensor("x3");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("============================ x3", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }
+
+    xxxx_test = net->get_output_tensor("h_x");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** h_x", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }    
+
+    xxxx_test = net->get_output_tensor("a_x");
+    if (tensor_valid(xxxx_test)) {
+        tensor_show("********************** a_x", xxxx_test);
+        tensor_destroy(xxxx_test);
+    }    
+
+
 	return output_tensor;
 }
 
@@ -469,7 +532,7 @@ int face_detect(RetinaFace *net, char *input_file, char *output_file)
     return RET_OK;
 }
 
-int face_gan(CodeFormer *net, TENSOR* input, TENSOR* detect_result)
+int face_gan(CodeFormer *net, GGMLModel *gan_model, TENSOR* input, TENSOR* detect_result)
 {
     check_tensor(input);
     check_tensor(detect_result);
@@ -491,7 +554,9 @@ int face_gan(CodeFormer *net, TENSOR* input, TENSOR* detect_result)
 
         TENSOR* cropped_face = get_affine_image(input, matrix, STANDARD_FACE_SIZE, STANDARD_FACE_SIZE);
         check_tensor(cropped_face);
+        tensor_show("cropped_face", cropped_face);
 
+        net->load_weight(gan_model, "");
         TENSOR* refined_face = facegan_forward(net, cropped_face);
         check_tensor(refined_face);
 
@@ -500,13 +565,16 @@ int face_gan(CodeFormer *net, TENSOR* input, TENSOR* detect_result)
         // pasted_mask = get_affine_image(self.face_mask, RM, H, W)
         // x = (1.0 - pasted_mask) * x + pasted_mask * pasted_face
         Eigen::Matrix3f matrix_inverse = matrix.inverse();
+
         TENSOR* pasted_face = get_affine_image(refined_face, matrix_inverse, input->height, input->width);
         check_tensor(pasted_face);
+
         TENSOR* pasted_mask = get_affine_image(face_mask, matrix_inverse, input->height, input->width);
         check_tensor(pasted_mask);
         for (int i = 0; i < input->batch * input->chan * input->height * input->width; i++) {
             input->data[i] = (1.0 - pasted_mask->data[i]) * input->data[i] + pasted_mask->data[i] * pasted_face->data[i];
         }
+
         tensor_destroy(pasted_mask);
         tensor_destroy(pasted_face);
 
@@ -518,7 +586,7 @@ int face_gan(CodeFormer *net, TENSOR* input, TENSOR* detect_result)
     return RET_OK;
 }
 
-int face_beauty(RetinaFace *det_net, CodeFormer *gan_net, char *input_file, char *output_file)
+int face_beauty(RetinaFace *det_net, CodeFormer *gan_net, GGMLModel *gan_model, char *input_file, char *output_file)
 {
     TENSOR* input_tensor;
 
@@ -531,13 +599,11 @@ int face_beauty(RetinaFace *det_net, CodeFormer *gan_net, char *input_file, char
     check_tensor(detect_result);
 
     int n = decode_landmarks(input_tensor->height, input_tensor->width, detect_result);
-    CheckPoint("detect %d faces", n);
-
     if (n < 1) { // NOT Found face
         syslog_info("NOT Found face in '%s' ...", input_file);
         tensor_saveas_image(input_tensor, 0 /*batch*/, output_file);
     } else {
-        face_gan(gan_net, input_tensor, detect_result);
+        face_gan(gan_net, gan_model, input_tensor, detect_result);
         tensor_saveas_image(input_tensor, 0 /*batch*/, output_file);
     }
     chmod(output_file, 0644);
@@ -616,9 +682,8 @@ int image_face_beauty(int device, int argc, char** argv, char *output_dir)
         }
 
         det_net.load_weight(&det_model, "");
-        gan_net.load_weight(&gan_model, "");
-
-		face_beauty(&det_net, &gan_net, argv[i], output_filename);
+        // gan_net.load_weight(&gan_model, "");
+		face_beauty(&det_net, &gan_net, &gan_model, argv[i], output_filename);
     }
 
     // free network ...
